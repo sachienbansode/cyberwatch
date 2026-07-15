@@ -6,6 +6,7 @@ import { query } from './db';
 
 const NAVY = '#233b57', BRAND = '#e07f10', MUTED = '#6b7789';
 const sevColor: Record<string, string> = { Critical: '#c0392b', High: '#e07f10', Medium: '#b8860b', Low: '#1E9E73', Info: '#8592A0' };
+function pngSize(buf: Buffer): { w: number; h: number } { try { return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }; } catch { return { w: 1280, h: 800 }; } }
 
 export async function streamReport(jobId: string, tenant: string, res: Response) {
   const [job] = await query<any>('SELECT * FROM vapt.scan_jobs WHERE id=$1 AND tenant_id=$2', [jobId, tenant]);
@@ -17,7 +18,10 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
 
   const counts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
   findings.forEach(f => counts[f.severity] = (counts[f.severity] || 0) + 1);
-  const [shot] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 ORDER BY created_at DESC LIMIT 1', [jobId]);
+  const allShots = await query<any>('SELECT caption, image_b64, kind FROM vapt.screenshots WHERE scan_job_id=$1', [jobId]);
+  const shotMap: Record<string, string> = {};
+  allShots.forEach(s => { if (s.caption) shotMap[s.caption] = s.image_b64; });
+  const shot = allShots.find(s => s.kind === 'asset') || allShots[0];
 
   const doc = new PDFDocument({ size: 'A4', margin: 54, bufferPages: true, info: { Title: `AntShield VAPT Report ${asset?.name || ''} v${job.version}` } });
   res.setHeader('Content-Type', 'application/pdf');
@@ -62,12 +66,15 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
   // Target screenshot (evidence)
   if (shot && shot.image_b64) {
     try {
-      if (doc.y > 560) doc.addPage();
+      const buf = Buffer.from(shot.image_b64, 'base64');
+      const { w, h } = pngSize(buf); const iw = 487; const ih = Math.min(300, Math.round(iw * h / (w || 1)));
+      if (doc.y + ih + 46 > 792) doc.addPage();
       doc.moveDown(0.6);
       doc.fillColor(NAVY).fontSize(12).font('Helvetica-Bold').text('Target screenshot');
       doc.moveDown(0.3);
-      doc.image(Buffer.from(shot.image_b64, 'base64'), { fit: [487, 300], align: 'center' });
-      doc.moveDown(0.5);
+      const iy = doc.y;
+      doc.image(buf, 54, iy, { fit: [iw, 300] });
+      doc.y = iy + ih + 12; doc.x = 54;
     } catch { /* image best-effort */ }
   }
 
@@ -85,8 +92,24 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
     doc.fillColor(MUTED).fontSize(9).font('Helvetica').text(`${f.category || '-'}${f.cvss ? '  •  CVSS '+f.cvss : ''}${f.cve ? '  •  '+f.cve : ''}${f.risk_score != null ? '  •  Risk '+f.risk_score : ''}${f.kev ? '  •  KEV' : ''}${f.cwe ? '  •  '+f.cwe : ''}  •  ${(f.framework_refs||[]).join('  •  ')}`, 122);
     if (f.description) doc.fillColor('#333').fontSize(9.5).font('Helvetica').text(f.description, 122, undefined, { width: 419 });
     if (f.remediation) { doc.fillColor(BRAND).fontSize(9).font('Helvetica-Bold').text('Recommendation: ', 122, undefined, { continued: true }); doc.fillColor('#333').font('Helvetica').text(f.remediation, { width: 419 }); }
-    const ev = f.evidence && typeof f.evidence === 'object' ? Object.entries(f.evidence).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}: ${String(v).slice(0, 120)}`).join('   •   ') : '';
-    if (ev) { doc.fillColor('#555').fontSize(8.5).font('Helvetica-Oblique').text('Evidence: ' + ev, 122, undefined, { width: 419 }); }
+    const evd: any = (f.evidence && typeof f.evidence === 'object') ? f.evidence : {};
+    if (evd.request || evd.response) {
+      doc.moveDown(0.15); doc.fillColor('#555').fontSize(8.5).font('Helvetica-Bold').text('Evidence', 122, undefined, { width: 419 });
+      if (evd.request) doc.font('Courier').fontSize(8).fillColor('#444').text('> ' + String(evd.request).slice(0, 160), 122, undefined, { width: 419 });
+      if (evd.response) doc.font('Courier').fontSize(8).fillColor('#444').text('< ' + String(evd.response).slice(0, 300), 122, undefined, { width: 419 });
+    } else {
+      const ev = Object.entries(evd).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}: ${String(v).slice(0, 120)}`).join('   -   ');
+      if (ev) doc.fillColor('#555').fontSize(8.5).font('Helvetica-Oblique').text('Evidence: ' + ev, 122, undefined, { width: 419 });
+    }
+    const furl = evd.url;
+    if (furl && furl !== job.target_url && shotMap[furl]) {
+      try {
+        const fbuf = Buffer.from(shotMap[furl], 'base64'); const ps = pngSize(fbuf); const fiw = 300; const fih = Math.min(190, Math.round(fiw * ps.h / (ps.w || 1)));
+        if (doc.y + fih + 22 > 792) doc.addPage();
+        doc.moveDown(0.3); const fy = doc.y; doc.image(fbuf, 122, fy, { fit: [fiw, 190] }); doc.y = fy + fih + 5; doc.x = 54;
+        doc.fillColor(MUTED).fontSize(7.5).font('Helvetica-Oblique').text('Screenshot evidence: ' + furl, 122, undefined, { width: 419 });
+      } catch { /* */ }
+    }
     doc.moveDown(0.8);
     doc.moveTo(54, doc.y).lineTo(541, doc.y).strokeColor('#eef2f7').stroke();
     doc.moveDown(0.4);

@@ -80,3 +80,14 @@ src/
   migrate.ts    schema migrator     cli.ts         one-shot scanner
 ```
 Aligned to the AntShield Technical Architecture (Deliverable 2); can evolve to NestJS + BullMQ.
+
+## Create the first admin user
+No default user is seeded. After running migrations, create your first admin in the DB (psql/pgAdmin):
+```sql
+INSERT INTO identity.users (tenant_id, email, name, password_hash, role_id)
+SELECT '00000000-0000-0000-0000-000000000001','admin@yourorg.com','Administrator',
+       crypt('ChangeMe#Strong1', gen_salt('bf')), r.id
+FROM identity.roles r WHERE r.name='admin'
+ON CONFLICT (email) DO NOTHING;
+```
+Then sign in and change the password / add more users from the Users screen.

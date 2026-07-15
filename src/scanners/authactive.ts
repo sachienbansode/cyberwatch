@@ -67,14 +67,14 @@ export const authActiveScanner: Scanner = {
           const marker = 'axs9271<z>'; const t = new URL(url.toString()); t.searchParams.set(p, marker);
           const r = await get(t.toString(), headers); const b = await r.text().catch(() => '');
           if (reflects(b, marker)) out.push({ title: `Reflected input without output-encoding in parameter "${p}"`, severity: 'High', category: 'injection', scanner: 'auth-active', cwe: 'CWE-79',
-            description: `The value of "${p}" is reflected into the response unencoded, indicating a potential reflected XSS.`, remediation: 'Context-aware output encoding; apply a strict Content-Security-Policy.', evidence: { url: t.toString(), parameter: p, marker } });
+            description: `The value of "${p}" is reflected into the response unencoded, indicating a potential reflected XSS.`, remediation: 'Context-aware output encoding; apply a strict Content-Security-Policy.', evidence: { url: t.toString(), request: 'GET ' + t.toString(), parameter: p, response: `Injected marker "${marker}" reflected unencoded in the response body` } });
         } catch { /* */ }
         // SQL error-based
         try {
           const t = new URL(url.toString()); t.searchParams.set(p, (url.searchParams.get(p) || '1') + "'");
           const r = await get(t.toString(), headers); const b = await r.text().catch(() => '');
           if (sqlErrorSignature(b)) out.push({ title: `Possible SQL injection (database error) in parameter "${p}"`, severity: 'Critical', category: 'injection', scanner: 'auth-active', cwe: 'CWE-89',
-            description: `Injecting a single quote into "${p}" elicited a database error, indicating unsanitised input reaching a SQL query.`, remediation: 'Use parameterised queries / prepared statements; validate input; least-privilege DB accounts.', evidence: { url: t.toString(), parameter: p } });
+            description: `Injecting a single quote into "${p}" elicited a database error, indicating unsanitised input reaching a SQL query.`, remediation: 'Use parameterised queries / prepared statements; validate input; least-privilege DB accounts.', evidence: { url: t.toString(), request: 'GET ' + t.toString(), parameter: p, response: 'SQL database error signature detected in the response body' } });
         } catch { /* */ }
         // Open redirect
         if (isRedirectParam(p)) {
@@ -82,7 +82,7 @@ export const authActiveScanner: Scanner = {
             const probe = 'https://antshield-probe.example/'; const t = new URL(url.toString()); t.searchParams.set(p, probe);
             const r = await get(t.toString(), headers, 'manual'); const loc = r.headers.get('location') || '';
             if (loc.startsWith(probe) || loc.startsWith('//antshield-probe.example')) out.push({ title: `Open redirect via parameter "${p}"`, severity: 'Medium', category: 'vulnerability', scanner: 'auth-active', cwe: 'CWE-601',
-              description: `"${p}" redirects to an attacker-controlled external URL without validation.`, remediation: 'Allowlist redirect destinations; use relative paths or mapping keys.', evidence: { url: t.toString(), parameter: p, location: loc } });
+              description: `"${p}" redirects to an attacker-controlled external URL without validation.`, remediation: 'Allowlist redirect destinations; use relative paths or mapping keys.', evidence: { url: t.toString(), request: 'GET ' + t.toString(), parameter: p, response: 'Location: ' + loc } });
           } catch { /* */ }
         }
       }

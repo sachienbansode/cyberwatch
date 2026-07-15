@@ -76,15 +76,17 @@ export const passiveScanner: Scanner = {
       ['permissions-policy', 'Missing Permissions-Policy', 'Info', 'headers',
         'Restrict powerful browser features via Permissions-Policy.'],
     ];
+    const presentHdrs = headerChecks.map(x => x[0]).filter(has);
     for (const [name, title, sev, cat, rem] of headerChecks) {
-      if (!has(name)) add(out, { title, severity: sev, category: cat, scanner: 'passive', remediation: rem });
+      if (!has(name)) add(out, { title, severity: sev, category: cat, scanner: 'passive', remediation: rem,
+        evidence: { request: 'GET ' + url, response: `HTTP ${resp.status} — response header "${name}" is absent. Present security headers: ${presentHdrs.join(', ') || 'none'}.` } });
     }
     if (!isHttps && has('content-security-policy')) { /* no-op */ }
 
     // 3. Server banner / tech disclosure
     const banner = [h.get('server'), h.get('x-powered-by')].filter(Boolean).join('; ');
     if (banner) add(out, { title: 'Server/technology banner disclosed', severity: 'Low', category: 'exposure', scanner: 'passive',
-      description: `Response advertises: ${banner}`, remediation: 'Suppress or genericise Server and X-Powered-By headers.', evidence: { banner } });
+      description: `Response advertises: ${banner}`, remediation: 'Suppress or genericise Server and X-Powered-By headers.', evidence: { request: 'GET ' + url, response: `Server: ${h.get('server') || '(none)'}${h.get('x-powered-by') ? '; X-Powered-By: ' + h.get('x-powered-by') : ''}` } });
 
     // 4. Cookie flags
     for (const c of resp.setCookies) {
@@ -92,7 +94,7 @@ export const passiveScanner: Scanner = {
       const name = c.split('=')[0];
       const missing = [!lc.includes('secure') && 'Secure', !lc.includes('httponly') && 'HttpOnly', !lc.includes('samesite') && 'SameSite'].filter(Boolean);
       if (missing.length) add(out, { title: `Cookie '${name}' missing ${missing.join(', ')} flag(s)`, severity: 'Medium', category: 'cookies', scanner: 'passive',
-        description: 'Session/security cookies lack protective attributes.', remediation: 'Set Secure, HttpOnly and SameSite on sensitive cookies.', cwe: 'CWE-614', evidence: { cookie: name } });
+        description: 'Session/security cookies lack protective attributes.', remediation: 'Set Secure, HttpOnly and SameSite on sensitive cookies.', cwe: 'CWE-614', evidence: { request: 'GET ' + url, response: 'Set-Cookie: ' + c.slice(0, 180) } });
     }
 
     // 5. TLS protocol & certificate (observation only)
@@ -101,17 +103,17 @@ export const passiveScanner: Scanner = {
       if (info) {
         if (info.protocol && /TLSv1(\.1)?$/.test(info.protocol)) {
           add(out, { title: `Weak TLS protocol negotiated (${info.protocol})`, severity: 'High', category: 'tls', scanner: 'passive',
-            description: 'The server negotiated a deprecated TLS version.', remediation: 'Disable TLS 1.0/1.1; require TLS 1.2+.', cwe: 'CWE-326', evidence: { protocol: info.protocol } });
+            description: 'The server negotiated a deprecated TLS version.', remediation: 'Disable TLS 1.0/1.1; require TLS 1.2+.', cwe: 'CWE-326', evidence: { request: 'TLS handshake ' + ctx.host + ':443', response: `Negotiated ${info.protocol}; certificate valid to ${info.validTo}` } });
         }
-        if (info.daysLeft <= 0) add(out, { title: 'TLS certificate expired', severity: 'High', category: 'tls', scanner: 'passive', evidence: { validTo: info.validTo } });
-        else if (info.daysLeft <= 21) add(out, { title: `TLS certificate expiring soon (${info.daysLeft} days)`, severity: 'Medium', category: 'tls', scanner: 'passive', evidence: { validTo: info.validTo } });
+        if (info.daysLeft <= 0) add(out, { title: 'TLS certificate expired', severity: 'High', category: 'tls', scanner: 'passive', evidence: { request: 'TLS handshake ' + ctx.host + ':443', response: `Certificate valid_to ${info.validTo} (expired)` } });
+        else if (info.daysLeft <= 21) add(out, { title: `TLS certificate expiring soon (${info.daysLeft} days)`, severity: 'Medium', category: 'tls', scanner: 'passive', evidence: { request: 'TLS handshake ' + ctx.host + ':443', response: `Certificate valid_to ${info.validTo}` } });
       }
     }
 
     // 6. security.txt presence (RFC 9116) — informational hygiene
     const st = await _fetch(new URL('/.well-known/security.txt', url).toString(), { redirect: 'follow' }).then((r: any) => r.status).catch(() => 0);
     if (st !== 200) add(out, { title: 'No security.txt disclosure policy', severity: 'Info', category: 'exposure', scanner: 'passive',
-      description: 'No /.well-known/security.txt was found.', remediation: 'Publish a security.txt with a disclosure contact (RFC 9116).' });
+      description: 'No /.well-known/security.txt was found.', remediation: 'Publish a security.txt with a disclosure contact (RFC 9116).', evidence: { request: 'GET /.well-known/security.txt', response: `HTTP ${st}` } });
 
 
     // 7. CORS policy (send a cross-origin Origin and observe reflection)
@@ -119,8 +121,8 @@ export const passiveScanner: Scanner = {
       const cr = await _fetch(url, { headers: { 'User-Agent': 'AntShield-VAPT/1.0', 'Origin': 'https://antshield-probe.example' }, redirect: 'manual' });
       const acao = cr.headers.get('access-control-allow-origin');
       const acac = cr.headers.get('access-control-allow-credentials');
-      if (acao === '*') add(out, { title: 'Permissive CORS policy (Access-Control-Allow-Origin: *)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'Any website can read responses from this origin.', remediation: 'Restrict CORS to an allowlist of trusted origins.', cwe: 'CWE-942' });
-      else if (acao === 'https://antshield-probe.example') add(out, { title: 'CORS reflects an arbitrary Origin', severity: acac === 'true' ? 'High' : 'Medium', category: 'headers', scanner: 'passive', description: 'The server echoes the request Origin' + (acac === 'true' ? ' and allows credentials, enabling cross-origin theft of authenticated data' : ''), remediation: 'Validate Origin against a strict allowlist; never reflect arbitrary origins, especially with credentials.', cwe: 'CWE-942' });
+      if (acao === '*') add(out, { title: 'Permissive CORS policy (Access-Control-Allow-Origin: *)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'Any website can read responses from this origin.', remediation: 'Restrict CORS to an allowlist of trusted origins.', cwe: 'CWE-942', evidence: { request: 'GET ' + url + '  (Origin: https://antshield-probe.example)', response: 'Access-Control-Allow-Origin: *' } });
+      else if (acao === 'https://antshield-probe.example') add(out, { title: 'CORS reflects an arbitrary Origin', severity: acac === 'true' ? 'High' : 'Medium', category: 'headers', scanner: 'passive', description: 'The server echoes the request Origin' + (acac === 'true' ? ' and allows credentials, enabling cross-origin theft of authenticated data' : ''), remediation: 'Validate Origin against a strict allowlist; never reflect arbitrary origins, especially with credentials.', cwe: 'CWE-942', evidence: { request: 'GET ' + url + '  (Origin: https://antshield-probe.example)', response: 'Access-Control-Allow-Origin: ' + acao + (acac ? '; Access-Control-Allow-Credentials: ' + acac : '') } });
     } catch { /* CORS probe best-effort */ }
 
     // 8. Dangerous HTTP methods
@@ -128,7 +130,7 @@ export const passiveScanner: Scanner = {
       const opt = await _fetch(url, { method: 'OPTIONS', redirect: 'manual' });
       const allow = (opt.headers.get('allow') || opt.headers.get('access-control-allow-methods') || '').toUpperCase();
       const risky = ['TRACE', 'TRACK', 'PUT', 'DELETE', 'CONNECT'].filter(m => allow.includes(m));
-      if (risky.length) add(out, { title: 'Potentially dangerous HTTP methods enabled: ' + risky.join(', '), severity: 'Low', category: 'exposure', scanner: 'passive', description: 'The server advertises HTTP methods that are rarely needed and can enable attacks (e.g. XST via TRACE).', remediation: 'Disable unused HTTP methods at the web server / WAF.', evidence: { allow } });
+      if (risky.length) add(out, { title: 'Potentially dangerous HTTP methods enabled: ' + risky.join(', '), severity: 'Low', category: 'exposure', scanner: 'passive', description: 'The server advertises HTTP methods that are rarely needed and can enable attacks (e.g. XST via TRACE).', remediation: 'Disable unused HTTP methods at the web server / WAF.', evidence: { request: 'OPTIONS ' + url, response: 'Allow: ' + allow } });
     } catch { /* methods probe best-effort */ }
 
     // 9. Exposed sensitive files (safe GET to well-known paths, signature-verified)
@@ -143,14 +145,14 @@ export const passiveScanner: Scanner = {
         const rr = await _fetch(new URL(pth, url).toString(), { redirect: 'manual', headers: { 'User-Agent': 'AntShield-VAPT/1.0' } });
         if (rr.status === 200) {
           const body = (await rr.text().catch(() => '')).slice(0, 4000);
-          if (ok(body)) add(out, { title: 'Exposed sensitive path: ' + pth, severity: sev, category: 'exposure', scanner: 'passive', description: 'A sensitive file is publicly accessible and may leak source code, credentials or configuration.', remediation: 'Block public access to ' + pth + ' at the web server and remove it from the web root.', cwe: 'CWE-538', evidence: { path: pth } });
+          if (ok(body)) add(out, { title: 'Exposed sensitive path: ' + pth, severity: sev, category: 'exposure', scanner: 'passive', description: 'A sensitive file is publicly accessible and may leak source code, credentials or configuration.', remediation: 'Block public access to ' + pth + ' at the web server and remove it from the web root.', cwe: 'CWE-538', evidence: { url: new URL(pth, url).toString(), request: 'GET ' + pth, response: 'HTTP 200 — ' + body.slice(0, 200).replace(/\s+/g, ' ') } });
         }
       } catch { /* probe best-effort */ }
     }
 
     // 10. CSP quality
     const csp = h.get('content-security-policy');
-    if (csp && /unsafe-inline|unsafe-eval|\*/.test(csp)) add(out, { title: 'Weak Content-Security-Policy (uses unsafe-inline / unsafe-eval / wildcard)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'The CSP contains directives that substantially weaken its XSS protection.', remediation: "Remove 'unsafe-inline'/'unsafe-eval' and wildcard sources; use nonces or hashes.", cwe: 'CWE-693' });
+    if (csp && /unsafe-inline|unsafe-eval|\*/.test(csp)) add(out, { title: 'Weak Content-Security-Policy (uses unsafe-inline / unsafe-eval / wildcard)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'The CSP contains directives that substantially weaken its XSS protection.', remediation: "Remove 'unsafe-inline'/'unsafe-eval' and wildcard sources; use nonces or hashes.", cwe: 'CWE-693', evidence: { request: 'GET ' + url, response: 'Content-Security-Policy: ' + csp.slice(0, 220) } });
 
     return out;
   },

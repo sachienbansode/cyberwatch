@@ -5,7 +5,7 @@ import { assertActiveAuthorized, AuthorizationError } from './authorization';
 import { enrich } from './mapping';
 import { getSetting, DEFAULT_SLA, slaDaysFor } from './settings';
 import { riskScore } from './enrich';
-import { captureScreenshot } from './screenshot';
+import { captureScreenshot, captureMany } from './screenshot';
 import { Finding, Profile, Scanner } from './types';
 
 function hostOf(url: string): string { try { return new URL(url).hostname; } catch { return url; } }
@@ -99,8 +99,18 @@ export async function runJob(jobId: string) {
   });
   steps[storeIdx].status = 'done'; steps[storeIdx].finishedAt = new Date().toISOString(); steps[storeIdx].findings = findings.length;
 
-  // capture a screenshot of the target (best-effort; needs Playwright on the host)
-  try { const b64 = await captureScreenshot(target); if (b64) await query('INSERT INTO vapt.screenshots(tenant_id,asset_id,scan_job_id,kind,caption,image_b64) VALUES ($1,$2,$3,$4,$5,$6)', [job.tenant_id, job.asset_id, jobId, 'asset', target, b64]); } catch { /* screenshot best-effort */ }
+  // capture screenshots: the target plus any URL-specific finding (evidence-justifying)
+  try {
+    const rows = await query<any>('SELECT id, evidence FROM vapt.findings WHERE scan_job_id=$1', [jobId]);
+    const urlMap: Record<string, string> = { [target]: '' };
+    for (const r of rows) { const u = r.evidence && r.evidence.url; if (u && !urlMap[u]) urlMap[u] = r.id; }
+    const shots = await captureMany(Object.keys(urlMap));
+    for (const [u, b64] of Object.entries(shots)) {
+      const isTarget = u === target;
+      await query('INSERT INTO vapt.screenshots(tenant_id,asset_id,scan_job_id,finding_id,kind,caption,image_b64) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [job.tenant_id, job.asset_id, jobId, isTarget ? null : (urlMap[u] || null), isTarget ? 'asset' : 'finding', u, b64]);
+    }
+  } catch { /* screenshots best-effort */ }
 
   const summary = { scanners: usedScanners, total: findings.length, bySeverity: counts };
   await query('UPDATE vapt.scan_jobs SET status=$2, summary=$3, scanners=$4, steps=$5, progress=100, current_step=NULL, finished_at=now() WHERE id=$1',

@@ -190,6 +190,15 @@ export function createApp() {
     const [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE asset_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 1', [req.params.id, req.user!.tenant]);
     await sendShot(row, res);
   });
+  app.get('/api/v1/findings/:id/screenshot', requireAuth('finding:read'), async (req: AuthedReq, res) => {
+    const [f] = await query<any>('SELECT scan_job_id, evidence FROM vapt.findings WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!f) return res.status(404).json({ error: 'not found' });
+    const url = f.evidence && f.evidence.url;
+    let row: any;
+    if (url) [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 AND caption=$2 ORDER BY created_at DESC LIMIT 1', [f.scan_job_id, url]);
+    if (!row) [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE finding_id=$1 LIMIT 1', [req.params.id]);
+    await sendShot(row, res);
+  });
   app.get('/api/v1/scan-jobs/:id/has-screenshot', requireAuth('scan:read'), async (req: AuthedReq, res) => {
     const [row] = await query<any>('SELECT id FROM vapt.screenshots WHERE scan_job_id=$1 AND tenant_id=$2 LIMIT 1', [req.params.id, req.user!.tenant]);
     res.json({ has: !!row });

@@ -135,7 +135,7 @@ input.mini{background:#fff}
     <div class="fld"><label>Password</label><input id="l_password" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
     <div class="lerr" id="l_err"></div>
     <button class="btn" style="width:100%;justify-content:center" id="l_btn" onclick="doLogin()">Sign in</button>
-    <div style="text-align:center;margin-top:14px;font-size:11.5px;color:var(--muted)">Seeded admin: admin@treeants.tech · change the password after first login</div>
+    <div style="text-align:center;margin-top:14px;font-size:11.5px;color:var(--muted)">Sign in with your administrator credentials</div>
   </div>
 </div>
 <!-- APP -->
@@ -485,9 +485,9 @@ function riskPill(r){if(r==null)return '<span class="mono" style="color:var(--mu
 function dl(k,v){return `<div class="drow"><span class="k">${k}</span><span class="v">${v}</span></div>`;}
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function evText(e){const d=e.detail||{};if(e.type==='status')return `Status ${d.from||'?'} → <b>${d.to}</b>`;if(e.type==='owner')return `Assigned to <b>${esc(d.owner)}</b>`;if(e.type==='comment')return esc(d.comment);if(e.type==='enrich')return `Enriched — risk ${d.risk_score}${d.kev?' · KEV':''}${d.epss!=null?' · EPSS '+Math.round(d.epss*100)+'%':''}`;if(e.type==='import')return 'Imported from scanner';if(e.type==='created')return 'Finding created';return e.type;}
-async function openFinding(id){try{const [f,ev]=await Promise.all([api('/findings/'+id),api('/findings/'+id+'/events')]);S.curFinding=f;S.curEvents=ev;renderFdrawer();$('fscrim').classList.add('show');$('fdrawer').classList.add('show');}catch(e){toast('Could not load finding: '+shortErr(e));}}
+async function openFinding(id){try{const [f,ev]=await Promise.all([api('/findings/'+id),api('/findings/'+id+'/events')]);S.curFinding=f;S.curEvents=ev;renderFdrawer();$('fscrim').classList.add('show');$('fdrawer').classList.add('show');loadShot('/findings/'+id+'/screenshot','fshot');}catch(e){toast('Could not load finding: '+shortErr(e));}}
 function closeFdrawer(){$('fscrim').classList.remove('show');$('fdrawer').classList.remove('show');}
-async function refreshFinding(id){const [f,ev]=await Promise.all([api('/findings/'+id),api('/findings/'+id+'/events')]);S.curFinding=f;S.curEvents=ev;renderFdrawer();}
+async function refreshFinding(id){const [f,ev]=await Promise.all([api('/findings/'+id),api('/findings/'+id+'/events')]);S.curFinding=f;S.curEvents=ev;renderFdrawer();loadShot('/findings/'+id+'/screenshot','fshot');}
 function renderFdrawer(){const f=S.curFinding;if(!f)return;const ev=S.curEvents||[];const w=can('finding:write');
  const statuses=['Open','Confirmed','In Progress','False Positive','Accepted Risk','Fixed','Retest','Closed'];
  let b=`<div class="fdh"><div class="fx" onclick="closeFdrawer()">${ic('x')}</div><div class="mono">${(f.id||'').slice(0,8)} · ${f.source||'scanner'}</div><div style="font-size:16px;font-weight:600;color:var(--navy);margin-top:4px;padding-right:36px">${esc(f.title)}</div><div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">${sevP(f.severity)}${riskPill(f.risk_score)!=='<span class="mono" style="color:var(--muted)">—</span>'?`<span class="pill p-${f.risk_score>=80?'critical':f.risk_score>=60?'high':f.risk_score>=40?'medium':f.risk_score>=20?'low':'info'}">Risk ${f.risk_score}</span>`:''}${f.kev?'<span class="pill p-critical">KEV</span>':''}${stP(f.status)}</div></div><div class="fdb">`;
@@ -500,7 +500,7 @@ function renderFdrawer(){const f=S.curFinding;if(!f)return;const ev=S.curEvents|
  if(f.evidence&&Object.keys(f.evidence).length)b+='<div class="dsec"><h4>Evidence</h4><div class="dcard mono" style="font-size:11.5px;word-break:break-all">'+Object.entries(f.evidence).filter(([k,v])=>v!=null&&v!=='').map(([k,v])=>esc(k)+': '+esc(String(v))).join('<br>')+'</div></div>';
  b+='<div class="dsec"><h4>History</h4>'+(ev.length?'<div class="tl">'+ev.map(e=>`<div class="ti"><div class="tt2">${evText(e)}</div><div class="tm">${e.actor||'system'} · ${fmtT(e.ts)}</div></div>`).join('')+'</div>':'<div class="dcard" style="color:var(--muted)">No history yet.</div>')+'</div>';
  if(w)b+=`<div class="dsec"><div style="display:flex;gap:8px"><input class="mini" id="fd_comment" placeholder="Add a comment…" style="flex:1"/><button class="btn sm" onclick="fComment('${f.id}')">Post</button></div></div>`;
- b+='</div>';$('fdrawer').innerHTML=b;}
+ b+='<div id="fshot" style="margin-top:8px"></div>';b+='</div>';$('fdrawer').innerHTML=b;}
 async function fStatus(id,st){try{await api('/findings/'+id,{method:'PATCH',body:{status:st}});await refreshFinding(id);loadAll();toast('Status → '+st);}catch(e){toast(shortErr(e));}}
 async function fOwner(id){const o=$('fd_owner').value.trim();if(!o)return;try{await api('/findings/'+id,{method:'PATCH',body:{owner:o}});await refreshFinding(id);toast('Owner assigned');}catch(e){toast(shortErr(e));}}
 async function fEnrich(id){try{toast('Enriching…',true);await api('/findings/'+id+'/enrich',{method:'POST'});await refreshFinding(id);loadAll();hideToast();toast('Enriched with EPSS/KEV');}catch(e){toast('Enrich failed: '+shortErr(e));}}

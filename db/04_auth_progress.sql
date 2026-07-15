@@ -40,9 +40,4 @@ INSERT INTO identity.roles(name,description,permissions) VALUES
  ('viewer', 'Read-only',                  ARRAY['asset:read','scan:read','finding:read'])
 ON CONFLICT (name) DO NOTHING;
 
--- ---- seed initial admin user (CHANGE THIS PASSWORD after first login) ----
-INSERT INTO identity.users(tenant_id,email,name,password_hash,role_id)
-SELECT '00000000-0000-0000-0000-000000000001','admin@treeants.tech','Administrator',
-       crypt('ChangeMe#2026', gen_salt('bf')), r.id
-FROM identity.roles r WHERE r.name='admin'
-ON CONFLICT (email) DO NOTHING;
+-- (no default user is seeded — create the first admin manually, see README)
