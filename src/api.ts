@@ -1,4 +1,5 @@
 import express from 'express';
+import * as path from 'path';
 import { z } from 'zod';
 import { query, audit } from './db';
 import { config } from './config';
@@ -6,6 +7,8 @@ import { config } from './config';
 export function createApp() {
   const app = express();
   app.use(express.json());
+  // Serve the AntShield web UI (public/) at the site root
+  app.use(express.static(path.join(__dirname, '..', 'public')));
   const tenant = config.defaultTenant;
 
   app.get('/health', (_req, res) => res.json({ ok: true, activeScansEnabled: config.activeScansEnabled }));
@@ -74,6 +77,25 @@ export function createApp() {
     if (req.query.status) { params.push(req.query.status); sql += ` AND status=$${params.length}`; }
     sql += ' ORDER BY (CASE severity WHEN \'Critical\' THEN 0 WHEN \'High\' THEN 1 WHEN \'Medium\' THEN 2 WHEN \'Low\' THEN 3 ELSE 4 END), created_at DESC LIMIT 500';
     res.json(await query(sql, params));
+  });
+
+  // ---- Update a finding (remediation) ----
+  app.patch('/api/v1/findings/:id', async (req, res) => {
+    const s = z.object({ status: z.enum(['Open', 'In Progress', 'Closed', 'Accepted Risk']) }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    const [row] = await query('UPDATE vapt.findings SET status=$3 WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, tenant, s.data.status]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await audit(tenant, 'api', 'finding.updated', 'finding', req.params.id, { status: s.data.status });
+    res.json(row);
+  });
+
+  // ---- Dashboard stats (computed) ----
+  app.get('/api/v1/stats', async (_req, res) => {
+    const [a] = await query('SELECT count(*)::int n FROM asset.assets WHERE tenant_id=$1', [tenant]);
+    const sev = await query(`SELECT severity, count(*)::int n FROM vapt.findings WHERE tenant_id=$1 AND status <> 'Closed' GROUP BY severity`, [tenant]);
+    const [due] = await query(`SELECT count(*)::int n FROM vapt.findings WHERE tenant_id=$1 AND status <> 'Closed' AND due_at < now() + interval '7 days'`, [tenant]);
+    const [jobs] = await query('SELECT count(*)::int n FROM vapt.scan_jobs WHERE tenant_id=$1', [tenant]);
+    res.json({ assets: a?.n || 0, findingsBySeverity: sev, dueSoon: due?.n || 0, scanJobs: jobs?.n || 0 });
   });
 
   return app;
