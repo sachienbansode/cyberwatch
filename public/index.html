@@ -177,7 +177,7 @@ const IC={dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="1
  users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
  back:'<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
- x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'};
+ x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'};
 const ic=(n,st)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="${st||''}">${IC[n]||''}</svg>`;
 
 // ---- Auth + API ----
@@ -217,8 +217,8 @@ const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
 const runningJob=()=>S.jobs.find(j=>j.status==='running'||j.status==='queued');
 const shortErr=e=>{let m=(e&&e.message)||String(e);try{const j=JSON.parse(m);m=j.error?(typeof j.error==='string'?j.error:'validation error'):m;}catch{}return m.slice(0,140);};
 
-const NAV=[{k:'dashboard',i:'dashboard',t:'Dashboard'},{sep:'VAPT'},{k:'assets',i:'assets',t:'Assets',bdg:()=>S.assets.length},{k:'scans',i:'scan',t:'Scans',bdg:()=>S.jobs.length},{k:'findings',i:'alert',t:'Findings',bdg:()=>openF().length},{k:'remediation',i:'shield',t:'Remediation'},{sep:'Governance'},{k:'compliance',i:'check',t:'Compliance',bdg:()=>OBLIGATIONS.length},{k:'howitworks',i:'book',t:'How it works'},{k:'users',i:'users',t:'Users',perm:'user:manage'}];
-const TITLES={dashboard:['Dashboard','Live · cyberwatch'],assets:['Assets','Systems under VAPT'],assetDetail:['Asset','Scan history & details'],scans:['Scans','Scan jobs & progress'],scanDetail:['Scan','Progress, steps & findings'],findings:['Findings','Live from your database'],remediation:['Remediation','SLA tracking'],compliance:['Compliance Mapping','RBI & SEBI obligations'],howitworks:['How the VAPT module works','Methodology & workflow'],users:['Users & Roles','Access control (RBAC)']};
+const NAV=[{k:'dashboard',i:'dashboard',t:'Dashboard'},{sep:'VAPT'},{k:'assets',i:'assets',t:'Assets',bdg:()=>S.assets.length},{k:'scans',i:'scan',t:'Scans',bdg:()=>S.jobs.length},{k:'findings',i:'alert',t:'Findings',bdg:()=>openF().length},{k:'remediation',i:'shield',t:'Remediation'},{sep:'Governance'},{k:'compliance',i:'check',t:'Compliance',bdg:()=>OBLIGATIONS.length},{k:'howitworks',i:'book',t:'How it works'},{k:'users',i:'users',t:'Users',perm:'user:manage'},{k:'settings',i:'settings',t:'Settings',perm:'user:manage'}];
+const TITLES={dashboard:['Dashboard','Live · cyberwatch'],assets:['Assets','Systems under VAPT'],assetDetail:['Asset','Scan history & details'],scans:['Scans','Scan jobs & progress'],scanDetail:['Scan','Progress, steps & findings'],findings:['Findings','Live from your database'],remediation:['Remediation','SLA tracking'],compliance:['Compliance Mapping','RBI & SEBI obligations'],howitworks:['How the VAPT module works','Methodology & workflow'],users:['Users & Roles','Access control (RBAC)'],settings:['Settings','Admin · SLA & active-scan policy']};
 function renderNav(){$('nav').innerHTML=NAV.filter(n=>n.sep||!n.perm||can(n.perm)).map(n=>n.sep?`<div class="navlbl">${n.sep}</div>`:`<div class="navi ${S.view===n.k?'on':''}" onclick="go('${n.k}')">${ic(n.i)}<span>${n.t}</span>${n.bdg?`<span class="bdg">${n.bdg()}</span>`:''}</div>`).join('');}
 function go(k){S.view=k;S.curAsset=null;S.curJob=null;render();}
 function openAsset(id){S.curAsset=id;S.view='assetDetail';render();}
@@ -412,7 +412,7 @@ function vUsers(){if(!can('user:manage'))return emptyState('users','You do not h
  ${ROLES.map(r=>`<tr><td class="tt">${r.name}</td><td>${r.description||''}</td><td>${(r.permissions||[]).map(p=>`<span class="tag" style="margin:2px">${p}</span>`).join(' ')}</td><td style="text-align:right;white-space:nowrap"><button class="btn sm gho" onclick="openRoleModal('${r.id}')">Edit</button> <button class="btn sm gho" onclick="delRole('${r.id}','${r.name}')">Delete</button></td></tr>`).join('')}
  </tbody></table></div>`;}
 
-const VIEWS={dashboard:vDashboard,assets:vAssets,assetDetail:vAssetDetail,scans:vScans,scanDetail:vScanDetail,findings:vFindings,remediation:vRemediation,compliance:vCompliance,howitworks:vHow,users:vUsers};
+const VIEWS={dashboard:vDashboard,assets:vAssets,assetDetail:vAssetDetail,scans:vScans,scanDetail:vScanDetail,findings:vFindings,remediation:vRemediation,compliance:vCompliance,howitworks:vHow,users:vUsers,settings:vSettings};
 // ---- Modals ----
 function openModal(html){$('modal').innerHTML=html;$('modal').classList.add('show');$('scrim').classList.add('show');}
 function closeModal(){$('modal').classList.remove('show');$('scrim').classList.remove('show');}
@@ -473,8 +473,9 @@ function render(){if(!ME)return;renderNav();
  $('view').innerHTML=(VIEWS[S.view]||vDashboard)();
  if(S.focusId){const el=$(S.focusId);if(el){const v=el.value;el.focus();el.value='';el.value=v;}S.focusId=null;}
  if(S.view==='scanDetail'&&S.curJob)loadShot('/scan-jobs/'+S.curJob+'/screenshot','shotbox');else if(S.view==='assetDetail'&&S.curAsset)loadShot('/assets/'+S.curAsset+'/screenshot','shotbox');
+ if(S.view==='assetDetail'&&S.curAsset)loadActiveStatus(S.curAsset);
 }
-const _go=go;go=function(k){if(k==='users'){S.view=k;S.curAsset=null;S.curJob=null;loadUsers();}else _go(k);};
+const _go=go;go=function(k){if(k==='users'){S.view=k;S.curAsset=null;S.curJob=null;loadUsers();}else if(k==='settings'){S.view=k;S.curAsset=null;S.curJob=null;loadSettings();}else _go(k);};
 
 // ---- Boot ----
 (async function(){if(TOKEN){try{ME=await api('/auth/me');enterApp();}catch{logout();}}else{logout();}})();
@@ -557,6 +558,98 @@ async function saveAuth(id){const b={method:$('au_method').value,loginUrl:$('au_
 // ---- OpenAPI import ----
 function openOpenApiModal(assetId){openModal(`<div class="mh">Import OpenAPI / Swagger</div><div class="mb"><div class="fld"><label>Spec file (JSON)</label><input id="oa_file" type="file" accept=".json,.txt"/></div><div class="hint" style="margin:0">${ic('info')}<span>Endpoints from the spec are added to the active-scan surface (Nuclei + authenticated crawler).</span></div></div><div class="mf"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="doOpenApi('${assetId}')">Import</button></div>`);}
 async function doOpenApi(id){const fi=$('oa_file');if(!fi.files||!fi.files.length){toast('Choose a JSON spec');return;}const content=await fi.files[0].text();try{toast('Importing…',true);const r=await api('/assets/'+id+'/openapi',{method:'POST',body:{content}});closeModal();hideToast();toast('Imported '+r.endpoints+' endpoints into the scan surface');}catch(e){toast('Import failed: '+shortErr(e));}}
+
+
+const hostOf=u=>{try{return new URL(u).hostname;}catch{return u;}};
+let SLA=null,LOCK=false;
+// ---- rich Add Asset ----
+function openAssetModal(){openModal(`<div class="mh">Add asset</div><div class="mb">
+ <div class="fld"><label>Name *</label><input id="f_name" placeholder="Internet Banking Portal"/></div>
+ <div class="fld"><label>Base URL *</label><input id="f_url" placeholder="https://app.example.com"/></div>
+ <div style="display:flex;gap:12px"><div class="fld" style="flex:1"><label>Type</label><select id="f_type"><option>Web App</option><option>API</option><option>Mobile</option><option>Network</option><option>Database</option></select></div>
+ <div class="fld" style="flex:1"><label>Criticality</label><select id="f_crit"><option>Critical</option><option selected>High</option><option>Medium</option><option>Low</option></select></div></div>
+ <div style="display:flex;gap:12px"><div class="fld" style="flex:1"><label>Environment</label><select id="f_env"><option>Production</option><option>Staging</option><option>UAT</option><option>Development</option></select></div>
+ <div class="fld" style="flex:1"><label>Data classification</label><select id="f_data"><option value="">—</option><option>Public</option><option>Internal</option><option>Confidential</option><option>Restricted / PII</option></select></div></div>
+ <div style="display:flex;gap:12px"><div class="fld" style="flex:1"><label>Owner</label><input id="f_owner" placeholder="team / person"/></div>
+ <div class="fld" style="flex:1"><label>Business unit</label><input id="f_bu" placeholder="Retail Banking"/></div></div>
+ <div style="display:flex;gap:12px"><div class="fld" style="flex:1"><label>Hosting region</label><input id="f_region" placeholder="AWS ap-south-1"/></div>
+ <div class="fld" style="flex:1"><label>Tags (comma-sep)</label><input id="f_tags" placeholder="pci, customer-facing"/></div></div>
+ <div class="fld"><label>Description / notes</label><input id="f_desc" placeholder="Short description"/></div>
+ </div><div class="mf"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="addAsset()">Add asset</button></div>`);}
+async function addAsset(){const b={name:$('f_name').value.trim(),baseUrl:$('f_url').value.trim(),type:$('f_type').value,criticality:$('f_crit').value,environment:$('f_env').value,dataClassification:$('f_data').value||undefined,owner:$('f_owner').value.trim()||undefined,businessUnit:$('f_bu').value.trim()||undefined,region:$('f_region').value.trim()||undefined,tags:($('f_tags').value||'').split(',').map(x=>x.trim()).filter(Boolean),description:$('f_desc').value.trim()||undefined};
+ if(!b.name||!b.baseUrl){toast('Name and URL are required');return;}
+ try{await api('/assets',{method:'POST',body:b});closeModal();toast('Asset added');await loadAll();}catch(e){toast('Could not add asset: '+shortErr(e));}}
+// ---- active scan legal consent ----
+function openActiveConsent(assetId,host){openModal(`<div class="mh">Enable active (intrusive) scanning</div><div class="mb">
+ <div class="dcard" style="max-height:190px;overflow:auto;font-size:12px;line-height:1.55;margin-bottom:12px"><b>Authorization &amp; legal terms</b><br>Active scanning sends intrusive, attack-style traffic to <b>${host}</b> (injection, fuzzing, redirect and port probes). By enabling it you confirm that:<br>• your organisation owns, or is contractually authorised to test, this system;<br>• you have obtained any approvals required by law and by the system's operator / hosting provider;<br>• testing may cause load, alerts or unintended effects, and Treeants Technologies accepts no liability for resulting impact;<br>• this authorization is time-bound and may be revoked at any time.</div>
+ <div class="fld"><label>Your name &amp; role (authoriser)</label><input id="ac_name" placeholder="e.g. R. Sharma, CISO"/></div>
+ <div class="fld"><label>Authorization valid for (days)</label><input id="ac_days" type="number" value="30" min="1" max="365"/></div>
+ <label style="display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--ink);cursor:pointer"><input type="checkbox" id="ac_accept" style="margin-top:2px"/> I confirm I am authorised to run active security testing against ${host} and accept the terms above.</label>
+ </div><div class="mf"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="doEnableActive('${assetId}','${host}')">Enable active scanning</button></div>`);}
+async function doEnableActive(assetId,host){const name=$('ac_name').value.trim(),accepted=$('ac_accept').checked,days=parseInt($('ac_days').value)||30;
+ if(!name){toast('Enter your name & role');return;}if(!accepted){toast('You must accept the terms');return;}
+ try{await api('/assets/'+assetId+'/authorizations',{method:'POST',body:{scopeHosts:[host],authorizedBy:name,method:'active',accepted:true,expiresInDays:days}});closeModal();toast('Active scanning enabled for '+host);await loadAll();}catch(e){toast('Failed: '+shortErr(e));}}
+async function loadActiveStatus(assetId){const el=$('activebox');if(!el)return;try{const s=await api('/assets/'+assetId+'/active-status');
+ if(s.enabled)el.innerHTML=`<div class="dcard" style="display:flex;align-items:center;gap:10px;background:var(--greenS);border-color:#bfe6d5"><span class="pill p-closed"><span class="pd"></span>Active scanning enabled</span><span style="font-size:12.5px;color:#177a58;flex:1">${s.host} · authorised by ${s.authorizedBy||'—'} · until ${fmt(s.expiresAt)}</span>${can('scan:run')?`<button class="btn sm sec" onclick="openActiveConsent('${assetId}','${s.host}')">Renew</button>`:''}</div>`;
+ else el.innerHTML=`<div class="dcard" style="display:flex;align-items:center;gap:12px"><span class="pill p-info">Active scanning disabled</span><span style="font-size:12.5px;color:var(--muted);flex:1">Intrusive testing is off for this asset.${s.orgLocked?' Locked org-wide by an administrator.':''}</span>${can('scan:run')&&!s.orgLocked?`<button class="btn sm" onclick="openActiveConsent('${assetId}','${s.host}')">${ic('lock')}Enable active scanning</button>`:''}</div>`;
+ }catch{el.innerHTML='';}}
+async function cancelScan(id){try{await api('/scan-jobs/'+id+'/cancel',{method:'POST'});toast('Scan cancelled');await loadAll();}catch(e){toast('Cancel failed: '+shortErr(e));}}
+// ---- admin settings ----
+async function loadSettings(){try{SLA=await api('/settings/sla');const l=await api('/settings/active-lock');LOCK=l.locked;}catch{SLA=null;}render();}
+function vSettings(){if(!can('user:manage'))return emptyState('users','No access to settings.');if(!SLA)return emptyState('clock','Loading settings…');
+ const crit=['Critical','High','Medium','Low'];const sev=['Critical','High','Medium','Low','Info'];
+ return `<div class="card tablecard"><div class="chd"><h2>Remediation SLA policy</h2><span class="leg">days to remediate · asset criticality × finding severity</span></div>
+ <table><thead><tr><th>Criticality \\ Severity</th>${sev.map(s=>`<th>${s}</th>`).join('')}</tr></thead><tbody>
+ ${crit.map(c=>`<tr><td class="tt">${c}</td>${sev.map(s=>`<td><input class="mini" style="width:62px" type="number" min="0" value="${(SLA[c]&&SLA[c][s])!=null?SLA[c][s]:''}" data-c="${c}" data-s="${s}"/></td>`).join('')}</tr>`).join('')}
+ </tbody></table><div style="padding:14px 16px"><button class="btn" onclick="saveSla()">Save SLA policy</button></div>
+ <div class="hint">${ic('info')}<span>Applied when findings are created. SEBI CSCRF baseline: high-severity within 1 week, others within 3 months.</span></div></div>
+ <div class="card" style="margin-top:16px"><div class="chd">${ic('lock','width:18px;height:18px;stroke:var(--brand)')}<h2>Active scanning — organisation control</h2></div>
+ <label style="display:flex;align-items:center;gap:10px;font-weight:500;cursor:pointer;padding:4px 2px"><input type="checkbox" id="lockchk" ${LOCK?'checked':''} onchange="saveLock(this.checked)"/> Lock all active scanning organisation-wide</label>
+ <div class="hint" style="margin:8px 0 0">${ic('info')}<span>${LOCK?'Active scanning is currently blocked for every asset, overriding per-asset authorizations.':'Active scanning is governed per-asset via the authorization consent flow.'}</span></div></div>`;}
+async function saveSla(){const m={};document.querySelectorAll('input[data-c]').forEach(i=>{m[i.dataset.c]=m[i.dataset.c]||{};m[i.dataset.c][i.dataset.s]=parseInt(i.value)||0;});try{await api('/settings/sla',{method:'PUT',body:m});SLA=m;toast('SLA policy saved');}catch(e){toast('Save failed: '+shortErr(e));}}
+async function saveLock(v){try{await api('/settings/active-lock',{method:'PUT',body:{locked:v}});LOCK=v;toast('Updated');render();}catch(e){toast(shortErr(e));}}
+// ---- overrides: vAssetDetail (rich) + vScanDetail (actions) ----
+function vAssetDetail(){const a=byId(S.assets,S.curAsset);if(!a)return emptyState('assets','Asset not found.');
+ const jobs=S.jobs.filter(j=>j.asset_id===a.id);const af=S.findings.filter(f=>f.asset_id===a.id&&f.status!=='Closed');
+ const meta2=[['Type',a.type],['Criticality',a.criticality],['Environment',a.environment],['Owner',a.owner],['Business unit',a.business_unit],['Region',a.region],['Data class',a.data_classification]].filter(x=>x[1]);
+ return `<div class="back" onclick="go('assets')">${ic('back')}Back to assets</div>
+ <div class="dhdr"><h2>${a.name}</h2></div>
+ <div class="meta">${meta2.map(m=>`<span>${m[0]} <b>${m[1]}</b></span>`).join('')}<span>URL <b>${a.base_url||'—'}</b></span><span>Open findings <b>${af.length}</b></span></div>
+ ${a.description?`<div class="dcard" style="margin-bottom:12px">${a.description}</div>`:''}
+ ${(a.tags&&a.tags.length)?`<div style="margin-bottom:12px">${a.tags.map(t=>`<span class="tag" style="margin:2px">${t}</span>`).join('')}</div>`:''}
+ <div id="activebox" style="margin:0 0 14px"></div>
+ <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">${can('scan:run')?`<button class="btn sm" onclick="runScan('${a.id}','passive')">${ic('scan')}Run passive scan</button><button class="btn sm sec" onclick="openScanModal('${a.id}')">${ic('plus')}New scan (profile)</button>`:''}${can('finding:write')?`<button class="btn sm sec" onclick="openImportModal('${a.id}')">${ic('download')}Import results</button>`:''}${can('scan:run')?`<button class="btn sm sec" onclick="openAuthModal('${a.id}')">${ic('lock')}Auth</button>`:''}${can('asset:write')?`<button class="btn sm sec" onclick="openOpenApiModal('${a.id}')">${ic('doc')}Import OpenAPI</button>`:''}</div>
+ <div id="shotbox" style="margin-bottom:16px"></div>
+ <div class="card tablecard"><div class="chd"><h2>Scan history</h2><span class="leg">${jobs.length} scans · newest first</span></div>
+ ${jobs.length?`<table><thead><tr><th>Version</th><th>Profile</th><th>Findings</th><th>Status</th><th>Started</th><th>Duration</th></tr></thead><tbody>
+ ${jobs.map(j=>{const d=(j.started_at&&j.finished_at)?dur((new Date(j.finished_at)-new Date(j.started_at))/1000):(j.status==='running'?'running…':'—');return `<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}</td><td class="mono">${fmtT(j.started_at||j.queued_at)}</td><td class="mono">${d}</td></tr>`;}).join('')}
+ </tbody></table>`:emptyState('scan','No scans for this asset yet.',can('scan:run')?`<button class="btn sm" onclick="runScan('${a.id}','passive')">${ic('scan')}Run first scan</button>`:'')}</div>`;}
+function vScanDetail(){const j=byId(S.jobs,S.curJob);if(!j)return emptyState('scan','Scan not found.');
+ const steps=j.steps||[];const running=j.status==='running'||j.status==='queued';const done=j.status==='completed';
+ const prog=done?100:(j.progress||0);const elapsed=j.started_at?((j.finished_at?new Date(j.finished_at):new Date())-new Date(j.started_at))/1000:0;
+ const fnds=S.findings.filter(f=>f.scan_job_id===j.id);
+ let stepsHtml;
+ if(steps.length)stepsHtml=steps.map(s=>`<div class="step ${s.status}">${stepIcon(s.status)}<span class="sn">${s.name}</span><span class="sd">${s.status==='done'&&s.startedAt&&s.finishedAt?dur((new Date(s.finishedAt)-new Date(s.startedAt))/1000)+(s.findings?` · ${s.findings} found`:''):s.status==='running'?'running…':s.status==='skipped'?'skipped':'queued'}</span></div>`).join('');
+ else if(done)stepsHtml=`<div class="step done">${stepIcon('done')}<span class="sn">Scan completed — ${fnds.length} finding(s) recorded</span><span class="sd">step timeline not captured</span></div>`;
+ else if(j.status==='blocked'||j.status==='failed'||j.status==='cancelled')stepsHtml=`<div class="step skipped">${stepIcon('skipped')}<span class="sn">${cap(j.status)}</span><span class="sd">${j.status_reason||''}</span></div>`;
+ else stepsHtml=`<div class="step running">${stepIcon('running')}<span class="sn">Preparing…</span><span class="sd">queued</span></div>`;
+ return `<div class="back" onclick="openAsset('${j.asset_id}')">${ic('back')}Back to ${assetName(j.asset_id)}</div>
+ <div class="dhdr"><h2>${assetName(j.asset_id)} — scan v${j.version}</h2></div>
+ <div class="meta"><span>Target <b>${j.target_url}</b></span><span>Profile <b>${j.profile}</b></span><span>Status ${running?`<b>${cap(j.status)}</b>`:stP(j.status)}</span><span>Requested by <b>${j.requested_by||'—'}</b></span></div>
+ <div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px">
+  ${(running&&can('scan:run'))?`<button class="btn sm sec" onclick="cancelScan('${j.id}')">Cancel scan</button>`:''}
+  ${(j.status==='blocked'&&j.profile!=='passive'&&can('scan:run'))?`<button class="btn sm" onclick="openActiveConsent('${j.asset_id}','${hostOf(j.target_url)}')">${ic('lock')}Enable active scanning</button>`:''}
+  ${(['blocked','failed','completed','cancelled'].includes(j.status)&&can('scan:run'))?`<button class="btn sm sec" onclick="runScan('${j.asset_id}','${j.profile}')">${ic('refresh')}Retry (new version)</button>`:''}
+ </div>
+ <div class="progwrap"><div class="progtop"><div class="progpct">${prog}%</div><div class="progbar"><span style="width:${Math.max(prog,2)}%"></span></div></div>
+   <div class="progtimes"><span>Started <b>${fmtT(j.started_at)}</b></span><span>${j.finished_at?'Finished':'Elapsed'} <b>${j.finished_at?fmtT(j.finished_at):dur(elapsed)}</b></span>${j.estimated_seconds?`<span>Est. total <b>~${dur(j.estimated_seconds)}</b></span>`:''}${j.finished_at&&j.started_at?`<span>Duration <b>${dur((new Date(j.finished_at)-new Date(j.started_at))/1000)}</b></span>`:''}</div>
+   <div class="steps">${stepsHtml}</div>
+   ${j.status==='blocked'?`<div class="hint" style="margin:14px 0 0">${ic('info')}<span style="color:var(--red)">${j.status_reason||'Blocked'}</span></div>`:''}</div>
+ <div id="shotbox" style="margin:16px 0"></div>
+ <div style="display:flex;align-items:center;gap:10px;margin:18px 0 14px"><h2 style="font-size:15px;color:var(--navy);margin:0">Findings (${fnds.length})</h2><div style="flex:1"></div>${can('report:read')&&done?`<button class="btn sm" onclick="downloadReport('${j.id}')">${ic('download')}Download PDF report</button>`:''}</div>
+ <div class="card tablecard">${fnds.length?`<table><thead><tr><th>Risk</th><th>Finding</th><th>Severity</th><th>Category</th><th>Scanner</th><th>CVE</th><th>Status</th></tr></thead><tbody>
+ ${fnds.map(f=>`<tr class="clickrow" onclick="openFinding('${f.id}')"><td>${riskPill(f.risk_score)}</td><td class="tt">${f.title}</td><td>${sevP(f.severity)}</td><td><span class="tag">${f.category||'-'}</span></td><td class="mono">${f.scanner||'-'}</td><td class="mono">${f.cve||'—'}</td><td>${stP(f.status)}</td></tr>`).join('')}
+ </tbody></table>`:running?emptyState('scan','Scanning… findings will appear as steps complete.'):emptyState('check','No findings recorded for this scan.')}</div>`;}
 
 </script>
 </body>

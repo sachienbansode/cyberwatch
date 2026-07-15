@@ -19,7 +19,7 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
   findings.forEach(f => counts[f.severity] = (counts[f.severity] || 0) + 1);
   const [shot] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 ORDER BY created_at DESC LIMIT 1', [jobId]);
 
-  const doc = new PDFDocument({ size: 'A4', margin: 54, info: { Title: `AntShield VAPT Report ${asset?.name || ''} v${job.version}` } });
+  const doc = new PDFDocument({ size: 'A4', margin: 54, bufferPages: true, info: { Title: `AntShield VAPT Report ${asset?.name || ''} v${job.version}` } });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="AntShield_VAPT_${(asset?.name||'scan').replace(/\W+/g,'_')}_v${job.version}.pdf"`);
   doc.pipe(res);
@@ -92,6 +92,13 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
     doc.moveDown(0.4);
   });
 
-  doc.fontSize(8).fillColor(MUTED).font('Helvetica').text('AntShield · Treeants Technologies · This report is confidential and for the named recipient only. Not legal advice.', 54, 800, { width: 487, align: 'center' });
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    const y = doc.page.height - 38;
+    doc.fontSize(8).fillColor(MUTED).font('Helvetica').text('AntShield · Treeants Technologies · Confidential — for the named recipient only. Not legal advice.', 54, y, { width: doc.page.width - 108, align: 'center', lineBreak: false });
+    doc.fontSize(8).fillColor(MUTED).text(String(i + 1 - range.start) + ' / ' + range.count, doc.page.width - 90, y, { width: 40, align: 'right', lineBreak: false });
+  }
+  doc.flushPages();
   doc.end();
 }

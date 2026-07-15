@@ -2,7 +2,8 @@ import { createHash } from 'crypto';
 import { withTenant, audit, query } from './db';
 import { scannersFor, requiresAuthorization } from './scanners/registry';
 import { assertActiveAuthorized, AuthorizationError } from './authorization';
-import { enrich, slaDays } from './mapping';
+import { enrich } from './mapping';
+import { getSetting, DEFAULT_SLA, slaDaysFor } from './settings';
 import { riskScore } from './enrich';
 import { captureScreenshot } from './screenshot';
 import { Finding, Profile, Scanner } from './types';
@@ -79,11 +80,12 @@ export async function runJob(jobId: string) {
   steps[storeIdx].status = 'running'; steps[storeIdx].startedAt = new Date().toISOString();
   await saveSteps(jobId, steps, Math.round((storeIdx / totalSteps) * 100), steps[storeIdx].name);
   const counts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
+  const slaPolicy = await getSetting('sla_policy', DEFAULT_SLA);
   await withTenant(job.tenant_id, async (c) => {
     for (const f of findings) {
       counts[f.severity] = (counts[f.severity] || 0) + 1;
       const fp = fingerprint(host, f);
-      const due = new Date(Date.now() + slaDays(f.severity) * 86400000);
+      const due = new Date(Date.now() + slaDaysFor(slaPolicy, f.severity, asset ? asset.criticality : 'High') * 86400000);
       const risk = riskScore({ cvss: f.cvss, severity: f.severity, epss: null, kev: false, assetCriticality: asset ? asset.criticality : 'High' });
       await c.query(
         `INSERT INTO vapt.findings

@@ -11,6 +11,7 @@ import { enrichFinding } from './enrich';
 import { enrich as mapRefs, slaDays } from './mapping';
 import { riskScore } from './enrich';
 import { captureScreenshot } from './screenshot';
+import { getSetting, setSetting, DEFAULT_SLA, slaDaysFor } from './settings';
 import { createHash } from 'crypto';
 
 export function createApp() {
@@ -35,24 +36,28 @@ export function createApp() {
   });
   app.post('/api/v1/assets', requireAuth('asset:write'), async (req: AuthedReq, res) => {
     const s = z.object({ name: z.string(), baseUrl: z.string().url(), type: z.string().optional(),
-      criticality: z.string().optional(), environment: z.string().optional(), inDmz: z.boolean().optional() }).safeParse(req.body);
+      criticality: z.string().optional(), environment: z.string().optional(), inDmz: z.boolean().optional(),
+      description: z.string().optional(), owner: z.string().optional(), businessUnit: z.string().optional(),
+      region: z.string().optional(), dataClassification: z.string().optional(), tags: z.array(z.string()).optional(), notes: z.string().optional() }).safeParse(req.body);
     if (!s.success) return res.status(400).json({ error: s.error.flatten() });
     const b = s.data;
-    const [row] = await query(`INSERT INTO asset.assets(tenant_id,name,base_url,type,criticality,environment,in_dmz)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.user!.tenant, b.name, b.baseUrl, b.type || 'Web App', b.criticality || 'High', b.environment || 'Production', b.inDmz ?? true]);
+    const [row] = await query(`INSERT INTO asset.assets(tenant_id,name,base_url,type,criticality,environment,in_dmz,description,owner,business_unit,region,data_classification,tags,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [req.user!.tenant, b.name, b.baseUrl, b.type || 'Web App', b.criticality || 'High', b.environment || 'Production', b.inDmz ?? true,
+       b.description || null, b.owner || null, b.businessUnit || null, b.region || null, b.dataClassification || null, b.tags || [], b.notes || null]);
     await audit(req.user!.tenant, req.user!.email, 'asset.created', 'asset', (row as any).id, { name: b.name });
     res.status(201).json(row);
   });
   app.post('/api/v1/assets/:id/authorizations', requireAuth('scan:run'), async (req: AuthedReq, res) => {
     const s = z.object({ scopeHosts: z.array(z.string()).min(1), authorizedBy: z.string(),
       authorizationRef: z.string().optional(), method: z.enum(['passive','baseline','active']).optional(),
-      expiresInDays: z.number().int().positive().max(365).optional() }).safeParse(req.body);
+      accepted: z.boolean().optional(), expiresInDays: z.number().int().positive().max(365).optional() }).safeParse(req.body);
     if (!s.success) return res.status(400).json({ error: s.error.flatten() });
     const b = s.data;
-    const [row] = await query(`INSERT INTO vapt.scan_authorizations(tenant_id,asset_id,scope_hosts,authorized_by,authorization_ref,method,expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6, now() + ($7 || ' days')::interval) RETURNING *`,
-      [req.user!.tenant, req.params.id, b.scopeHosts, b.authorizedBy, b.authorizationRef || null, b.method || 'active', String(b.expiresInDays || 30)]);
+    if (!b.accepted) return res.status(400).json({ error: 'you must accept the active-scan authorization terms' });
+    const [row] = await query(`INSERT INTO vapt.scan_authorizations(tenant_id,asset_id,scope_hosts,authorized_by,authorization_ref,method,expires_at,accepted_at)
+       VALUES ($1,$2,$3,$4,$5,$6, now() + ($7 || ' days')::interval, now()) RETURNING *`,
+      [req.user!.tenant, req.params.id, b.scopeHosts, b.authorizedBy, b.authorizationRef || 'legal-consent', b.method || 'active', String(b.expiresInDays || 30)]);
     await audit(req.user!.tenant, req.user!.email, 'authorization.granted', 'asset', req.params.id, { scopeHosts: b.scopeHosts });
     res.status(201).json(row);
   });
@@ -127,10 +132,11 @@ export function createApp() {
     const [imp] = await query<any>('INSERT INTO vapt.imports(tenant_id,asset_id,source,filename,findings_count,imported_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
       [req.user!.tenant, asset.id, fmt, s.data.filename || null, findings.length, req.user!.email]);
     const counts: any = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
+    const slaPolicy = await getSetting('sla_policy', DEFAULT_SLA);
     for (const f of findings) {
       mapRefs(f); counts[f.severity] = (counts[f.severity] || 0) + 1;
       const fp = createHash('sha1').update(`${f.scanner}|${f.category}|${f.title}|${host}`).digest('hex');
-      const due = new Date(Date.now() + slaDays(f.severity) * 86400000);
+      const due = new Date(Date.now() + slaDaysFor(slaPolicy, f.severity, asset.criticality) * 86400000);
       const risk = riskScore({ cvss: f.cvss, severity: f.severity, epss: null, kev: false, assetCriticality: asset.criticality });
       await query(`INSERT INTO vapt.findings (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,cve,cvss_vector,refs,source,risk_score)
         VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -218,6 +224,43 @@ export function createApp() {
     await query('UPDATE asset.assets SET extra_urls=$2 WHERE id=$1', [req.params.id, urls]);
     await audit(req.user!.tenant, req.user!.email, 'asset.openapi_imported', 'asset', req.params.id, { count: urls.length });
     res.json({ endpoints: urls.length });
+  });
+
+
+  // ---- Cancel a queued scan ----
+  app.post('/api/v1/scan-jobs/:id/cancel', requireAuth('scan:run'), async (req: AuthedReq, res) => {
+    const [j] = await query<any>('SELECT status FROM vapt.scan_jobs WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!j) return res.status(404).json({ error: 'not found' });
+    if (j.status !== 'queued' && j.status !== 'running') return res.status(400).json({ error: 'only queued/running scans can be cancelled' });
+    await query("UPDATE vapt.scan_jobs SET status='cancelled', status_reason=$3, finished_at=now() WHERE id=$1 AND tenant_id=$2", [req.params.id, req.user!.tenant, 'cancelled by ' + req.user!.email]);
+    await audit(req.user!.tenant, req.user!.email, 'scan.cancelled', 'scan_job', req.params.id, {});
+    res.json({ ok: true });
+  });
+
+  // ---- Active-scan authorization status for an asset ----
+  app.get('/api/v1/assets/:id/active-status', requireAuth('scan:read'), async (req: AuthedReq, res) => {
+    const [asset] = await query<any>('SELECT base_url FROM asset.assets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    const host = (() => { try { return new URL(asset.base_url).hostname; } catch { return ''; } })();
+    const [row] = await query<any>(`SELECT authorized_by, expires_at FROM vapt.scan_authorizations WHERE asset_id=$1 AND active=true AND expires_at>now() AND $2 = ANY(scope_hosts) ORDER BY expires_at DESC LIMIT 1`, [req.params.id, host]);
+    const locked = await getSetting<boolean>('active_scans_locked', false);
+    res.json({ enabled: !!row, host, authorizedBy: row?.authorized_by, expiresAt: row?.expires_at, orgLocked: locked });
+  });
+
+  // ---- Admin settings ----
+  app.get('/api/v1/settings/sla', requireAuth('user:manage'), async (_req, res) => res.json(await getSetting('sla_policy', DEFAULT_SLA)));
+  app.put('/api/v1/settings/sla', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const s = z.record(z.record(z.number().int().min(0).max(3650))).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: 'invalid SLA matrix' });
+    await setSetting('sla_policy', s.data);
+    await audit(req.user!.tenant, req.user!.email, 'settings.sla_updated', 'settings', 'sla_policy', {});
+    res.json({ ok: true });
+  });
+  app.get('/api/v1/settings/active-lock', requireAuth('user:manage'), async (_req, res) => res.json({ locked: await getSetting<boolean>('active_scans_locked', false) }));
+  app.put('/api/v1/settings/active-lock', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const s = z.object({ locked: z.boolean() }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: 'locked boolean required' });
+    await setSetting('active_scans_locked', s.data.locked);
+    res.json({ ok: true });
   });
 
   // ---- Stats ----
