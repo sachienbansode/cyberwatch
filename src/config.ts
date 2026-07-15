@@ -18,6 +18,8 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || 'info',
   // SAFETY kill-switch: active/intrusive scanning is off unless explicitly enabled.
   activeScansEnabled: bool(process.env.ACTIVE_SCANS_ENABLED, false),
+  jwtSecret: process.env.JWT_SECRET || 'dev-only-change-me-in-production',
+  jwtExpiry: process.env.JWT_EXPIRY || '12h',
   tools: {
     zapBaseline: process.env.ZAP_BASELINE || 'zap-baseline.py',
     zapFull: process.env.ZAP_FULL || 'zap-full-scan.py',
