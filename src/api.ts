@@ -299,6 +299,54 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+
+  // ---- Compliance (live) ----
+  async function complianceAuto(t: string): Promise<Record<string, string>> {
+    const [a] = await query<any>('SELECT count(*)::int n FROM asset.assets WHERE tenant_id=$1', [t]);
+    const [s] = await query<any>("SELECT count(*)::int n FROM vapt.scan_jobs WHERE tenant_id=$1 AND status='completed'", [t]);
+    const [f] = await query<any>('SELECT count(*)::int n FROM vapt.findings WHERE tenant_id=$1', [t]);
+    const [od] = await query<any>("SELECT count(*)::int n FROM vapt.findings WHERE tenant_id=$1 AND status<>'Closed' AND severity IN ('Critical','High') AND due_at < now()", [t]);
+    return {
+      asset_inventory: a.n > 0 ? 'Met' : 'Not Met',
+      vapt_conducted: s.n > 0 ? 'Met' : 'Not Met',
+      remediation_sla: od.n > 0 ? 'In Progress' : (f.n > 0 ? 'Met' : 'Not Met'),
+      audit_trail: 'Met',
+      incident_reporting: 'In Progress',
+    };
+  }
+  app.get('/api/v1/compliance', requireAuth('finding:read'), async (req: AuthedReq, res) => {
+    const t = req.user!.tenant;
+    const obs = await query<any>('SELECT * FROM grc.obligations ORDER BY sort, id');
+    const st = await query<any>('SELECT * FROM grc.compliance_status WHERE tenant_id=$1', [t]);
+    const sm: Record<string, any> = {}; st.forEach(x => sm[x.obligation_id] = x);
+    const auto = await complianceAuto(t);
+    res.json(obs.map(o => {
+      const m = sm[o.id]; const a = o.auto_key ? auto[o.auto_key] : null;
+      const status = m ? m.status : (a || 'Not Assessed');
+      return { id: o.id, framework: o.framework, clause: o.clause, requirement: o.requirement, applicability: o.applicability,
+        cadence: o.cadence, control: o.control, module: o.module, evidence_expected: o.evidence_expected, phase: o.phase,
+        auto: !!o.auto_key, status, source: m ? 'manual' : (a ? 'auto' : 'default'),
+        owner: m?.owner || null, notes: m?.notes || null, evidenceRefs: m?.evidence_refs || [], updatedAt: m?.updated_at || null, updatedBy: m?.updated_by || null };
+    }));
+  });
+  app.patch('/api/v1/compliance/:id', requireAuth('finding:write'), async (req: AuthedReq, res) => {
+    const s = z.object({ status: z.enum(['Met', 'In Progress', 'Not Met', 'Not Applicable', 'Not Assessed']).optional(),
+      owner: z.string().optional(), notes: z.string().optional(), evidenceRefs: z.array(z.any()).optional() }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    const [o] = await query<any>('SELECT id FROM grc.obligations WHERE id=$1', [req.params.id]);
+    if (!o) return res.status(404).json({ error: 'unknown obligation' });
+    const b = s.data; const t = req.user!.tenant;
+    await query(`INSERT INTO grc.compliance_status(tenant_id,obligation_id,status,owner,notes,evidence_refs,updated_by,updated_at)
+       VALUES ($1,$2,coalesce($3,'Not Assessed'),$4,$5,coalesce($6,'[]'::jsonb),$7,now())
+       ON CONFLICT (tenant_id,obligation_id) DO UPDATE SET
+         status=coalesce($3, grc.compliance_status.status), owner=coalesce($4, grc.compliance_status.owner),
+         notes=coalesce($5, grc.compliance_status.notes), evidence_refs=coalesce($6, grc.compliance_status.evidence_refs),
+         updated_by=$7, updated_at=now()`,
+      [t, req.params.id, b.status || null, b.owner || null, b.notes || null, b.evidenceRefs ? JSON.stringify(b.evidenceRefs) : null, req.user!.email]);
+    await audit(t, req.user!.email, 'compliance.updated', 'obligation', req.params.id, b);
+    res.json({ ok: true });
+  });
+
   // ---- Stats ----
   app.get('/api/v1/stats', requireAuth('asset:read'), async (req: AuthedReq, res) => {
     const t = req.user!.tenant;
