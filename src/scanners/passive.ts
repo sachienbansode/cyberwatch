@@ -113,6 +113,45 @@ export const passiveScanner: Scanner = {
     if (st !== 200) add(out, { title: 'No security.txt disclosure policy', severity: 'Info', category: 'exposure', scanner: 'passive',
       description: 'No /.well-known/security.txt was found.', remediation: 'Publish a security.txt with a disclosure contact (RFC 9116).' });
 
+
+    // 7. CORS policy (send a cross-origin Origin and observe reflection)
+    try {
+      const cr = await _fetch(url, { headers: { 'User-Agent': 'AntShield-VAPT/1.0', 'Origin': 'https://antshield-probe.example' }, redirect: 'manual' });
+      const acao = cr.headers.get('access-control-allow-origin');
+      const acac = cr.headers.get('access-control-allow-credentials');
+      if (acao === '*') add(out, { title: 'Permissive CORS policy (Access-Control-Allow-Origin: *)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'Any website can read responses from this origin.', remediation: 'Restrict CORS to an allowlist of trusted origins.', cwe: 'CWE-942' });
+      else if (acao === 'https://antshield-probe.example') add(out, { title: 'CORS reflects an arbitrary Origin', severity: acac === 'true' ? 'High' : 'Medium', category: 'headers', scanner: 'passive', description: 'The server echoes the request Origin' + (acac === 'true' ? ' and allows credentials, enabling cross-origin theft of authenticated data' : ''), remediation: 'Validate Origin against a strict allowlist; never reflect arbitrary origins, especially with credentials.', cwe: 'CWE-942' });
+    } catch { /* CORS probe best-effort */ }
+
+    // 8. Dangerous HTTP methods
+    try {
+      const opt = await _fetch(url, { method: 'OPTIONS', redirect: 'manual' });
+      const allow = (opt.headers.get('allow') || opt.headers.get('access-control-allow-methods') || '').toUpperCase();
+      const risky = ['TRACE', 'TRACK', 'PUT', 'DELETE', 'CONNECT'].filter(m => allow.includes(m));
+      if (risky.length) add(out, { title: 'Potentially dangerous HTTP methods enabled: ' + risky.join(', '), severity: 'Low', category: 'exposure', scanner: 'passive', description: 'The server advertises HTTP methods that are rarely needed and can enable attacks (e.g. XST via TRACE).', remediation: 'Disable unused HTTP methods at the web server / WAF.', evidence: { allow } });
+    } catch { /* methods probe best-effort */ }
+
+    // 9. Exposed sensitive files (safe GET to well-known paths, signature-verified)
+    const probes: [string, Finding['severity'], (b: string) => boolean][] = [
+      ['/.git/HEAD', 'High', b => /^ref:\s/.test(b.trim())],
+      ['/.env', 'High', b => /^[A-Z0-9_]+=.*/m.test(b) && /(SECRET|KEY|PASSWORD|PASSWD|TOKEN|DB_|DATABASE|API)/i.test(b)],
+      ['/server-status', 'Medium', b => /Apache Server Status|Server uptime|Total accesses/i.test(b)],
+      ['/.svn/entries', 'High', b => /^\d+|dir|svn:/i.test(b.trim())],
+    ];
+    for (const [pth, sev, ok] of probes) {
+      try {
+        const rr = await _fetch(new URL(pth, url).toString(), { redirect: 'manual', headers: { 'User-Agent': 'AntShield-VAPT/1.0' } });
+        if (rr.status === 200) {
+          const body = (await rr.text().catch(() => '')).slice(0, 4000);
+          if (ok(body)) add(out, { title: 'Exposed sensitive path: ' + pth, severity: sev, category: 'exposure', scanner: 'passive', description: 'A sensitive file is publicly accessible and may leak source code, credentials or configuration.', remediation: 'Block public access to ' + pth + ' at the web server and remove it from the web root.', cwe: 'CWE-538', evidence: { path: pth } });
+        }
+      } catch { /* probe best-effort */ }
+    }
+
+    // 10. CSP quality
+    const csp = h.get('content-security-policy');
+    if (csp && /unsafe-inline|unsafe-eval|\*/.test(csp)) add(out, { title: 'Weak Content-Security-Policy (uses unsafe-inline / unsafe-eval / wildcard)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'The CSP contains directives that substantially weaken its XSS protection.', remediation: "Remove 'unsafe-inline'/'unsafe-eval' and wildcard sources; use nonces or hashes.", cwe: 'CWE-693' });
+
     return out;
   },
 };

@@ -123,6 +123,7 @@ tbody td{padding:11px 16px;border-bottom:1px solid var(--line2)}tbody tr:last-ch
 .sevbar{cursor:pointer;padding:5px 6px;border-radius:8px;margin:3px -6px}.sevbar:hover{background:#F7F9FC}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
 input.mini{background:#fff}
+.expand>td{padding:0!important}
 </style>
 </head>
 <body>
@@ -198,7 +199,7 @@ function enterApp(){$('login').classList.add('hidden');$('app').classList.remove
  renderNav();loadAll();}
 
 // ---- State + helpers ----
-let S={view:'dashboard',assets:[],findings:[],jobs:[],findSev:'All',compFw:'All',curAsset:null,curJob:null,loading:true,err:null,q:{},scanStatus:'All',findStatus:'All',focusId:null};
+let S={view:'dashboard',assets:[],findings:[],jobs:[],findSev:'All',compFw:'All',curAsset:null,curJob:null,loading:true,err:null,q:{},scanStatus:'All',findStatus:'All',focusId:null,expandedScan:null,scanAsset:'All',scanProfile:'All'};
 const $=id=>document.getElementById(id);
 const byId=(a,id)=>a.find(x=>x.id===id);
 const assetName=id=>{const a=byId(S.assets,id);return a?a.name:(id||'').slice(0,8);};
@@ -272,14 +273,46 @@ function vAssetDetail(){const a=byId(S.assets,S.curAsset);if(!a)return emptyStat
  ${jobs.map(j=>{const d=j.started_at&&j.finished_at?dur((new Date(j.finished_at)-new Date(j.started_at))/1000):(j.status==='running'?'running…':'—');return `<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}</td><td class="mono">${fmtT(j.started_at||j.queued_at)}</td><td class="mono">${d}</td></tr>`;}).join('')}
  </tbody></table>`:emptyState('scan','No scans for this asset yet.',can('scan:run')?`<button class="btn sm" onclick="runScan('${a.id}','passive')">${ic('scan')}Run first scan</button>`:'')}</div>`;}
 // ---- Scans list ----
-function vScans(){const q=(S.q.scans||'').toLowerCase();const st=S.scanStatus||'All';const statuses=['All','completed','running','queued','blocked','failed'];
- let list=S.jobs.filter(j=>!q||j.target_url.toLowerCase().includes(q)||(j.profile||'').includes(q)||(j.requested_by||'').toLowerCase().includes(q)||(j.status||'').includes(q));
+function vScans(){const q=(S.q.scans||'').toLowerCase();const st=S.scanStatus||'All';const aid=S.scanAsset||'All';const pf=S.scanProfile||'All';
+ const statuses=['All','completed','running','queued','blocked','failed'];const profiles=['All','passive','baseline','active'];
+ let list=S.jobs.filter(j=>!q||j.target_url.toLowerCase().includes(q)||assetName(j.asset_id).toLowerCase().includes(q)||(j.profile||'').includes(q)||(j.requested_by||'').toLowerCase().includes(q)||(j.status||'').includes(q));
  if(st!=='All')list=list.filter(j=>j.status===st);
- return `${runBanner()}<div class="toolbar"><input class="mini" id="q_scans" placeholder="Search scans…" value="${S.q.scans||''}" oninput="setQ('scans',this.value)" style="width:220px"/><div class="seg">${statuses.map(s=>`<span class="s ${st===s?'on':''}" onclick="setScanStatus('${s}')">${cap(s)}</span>`).join('')}</div><span class="leg" style="margin-left:auto;color:var(--muted)">${list.length} scans</span></div>
- <div class="card tablecard">${list.length?`<table><thead><tr><th>Target</th><th>Ver</th><th>Profile</th><th>Findings</th><th>Status</th><th>Requested by</th><th>Queued</th></tr></thead><tbody>
- ${list.map(j=>`<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">${j.target_url}</td><td class="mono">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}${j.status_reason?` <span title="${j.status_reason}">⚑</span>`:''}</td><td class="mono">${j.requested_by||'—'}</td><td class="mono">${fmt(j.queued_at)}</td></tr>`).join('')}
+ if(aid!=='All')list=list.filter(j=>j.asset_id===aid);
+ if(pf!=='All')list=list.filter(j=>j.profile===pf);
+ return `${runBanner()}<div class="toolbar"><input class="mini" id="q_scans" placeholder="Search scans…" value="${S.q.scans||''}" oninput="setQ('scans',this.value)" style="width:190px"/>
+  <select class="mini" onchange="setScanAsset(this.value)"><option value="All">All assets</option>${S.assets.map(a=>`<option value="${a.id}" ${aid===a.id?'selected':''}>${a.name}</option>`).join('')}</select>
+  <select class="mini" onchange="setScanProfile(this.value)">${profiles.map(p=>`<option value="${p}" ${pf===p?'selected':''}>${p==='All'?'All profiles':p}</option>`).join('')}</select>
+  <div class="seg">${statuses.map(s=>`<span class="s ${st===s?'on':''}" onclick="setScanStatus('${s}')">${cap(s)}</span>`).join('')}</div>
+  <span class="leg" style="margin-left:auto;color:var(--muted)">${list.length} scans</span></div>
+ <div class="card tablecard">${list.length?`<table><thead><tr><th style="width:26px"></th><th>Asset</th><th>Ver</th><th>Profile</th><th>Findings</th><th>Status</th><th>Requested by</th><th>Date</th><th></th></tr></thead><tbody>
+ ${list.map(j=>scanRow(j)).join('')}
  </tbody></table>`:emptyState('scan','No scans match.',can('scan:run')?'<button class="btn sm" onclick="openScanModal()">'+ic('plus')+'Run scan</button>':'')}
- <div class="hint">${ic('info')}<span>Passive scans are safe & non-intrusive. Baseline/active require ACTIVE_SCANS_ENABLED and a stored authorization.</span></div></div>`;}
+ <div class="hint">${ic('info')}<span>Click any scan to expand its findings and report inline. Re-scanning an asset creates a new version — full history is kept.</span></div></div>`;}
+function scanRow(j){const open=S.expandedScan===j.id;
+ const statusCell=(j.status==='running'||j.status==='queued')?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status);
+ let row=`<tr class="clickrow" onclick="toggleScan('${j.id}')"><td style="text-align:center;color:var(--muted);font-size:11px">${open?'▾':'▸'}</td><td class="tt">${assetName(j.asset_id)}</td><td class="mono">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${statusCell}${j.status_reason?` <span title="${j.status_reason}">⚑</span>`:''}</td><td class="mono">${j.requested_by||'—'}</td><td class="mono">${fmt(j.queued_at)}</td><td style="text-align:right;white-space:nowrap" onclick="event.stopPropagation()">${can('report:read')&&j.status==='completed'?`<button class="btn sm gho" onclick="viewReport('${j.id}')">Report</button>`:''}</td></tr>`;
+ if(open)row+=`<tr class="expand"><td colspan="9">${scanExpand(j)}</td></tr>`;
+ return row;}
+function scanExpand(j){const fnds=S.findings.filter(f=>f.scan_job_id===j.id);const done=j.status==='completed';
+ const dur2=(j.started_at&&j.finished_at)?dur((new Date(j.finished_at)-new Date(j.started_at))/1000):(j.status==='running'?'running…':'—');
+ const c={Critical:0,High:0,Medium:0,Low:0,Info:0};fnds.forEach(f=>c[f.severity]=(c[f.severity]||0)+1);
+ return `<div style="padding:16px 18px;background:#FBFCFE">
+  <div class="meta" style="margin:0 0 12px"><span>Target <b>${j.target_url}</b></span><span>Started <b>${fmtT(j.started_at)}</b></span><span>Duration <b>${dur2}</b></span><span>Scanners <b>${(j.scanners||[]).join(', ')||'—'}</b></span></div>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+   ${['Critical','High','Medium','Low','Info'].map(k=>c[k]?`<span class="pill p-${k.toLowerCase()}"><span class="pd"></span>${k}: ${c[k]}</span>`:'').join('')}
+   <div style="flex:1"></div>
+   ${can('report:read')&&done?`<button class="btn sm" onclick="viewReport('${j.id}')">${ic('doc')}View PDF</button><button class="btn sm sec" onclick="downloadReport('${j.id}')">${ic('download')}Download</button>`:''}
+   ${can('scan:run')&&done?`<button class="btn sm sec" onclick="runScan('${j.asset_id}','${j.profile}')">${ic('refresh')}Re-scan (new version)</button>`:''}
+   <button class="btn sm gho" onclick="openJob('${j.id}')">Full page →</button>
+  </div>
+  ${fnds.length?`<div style="border:1px solid var(--line);border-radius:10px;overflow:hidden"><table><thead><tr><th>Risk</th><th>Finding</th><th>Severity</th><th>CVE</th><th>Status</th></tr></thead><tbody>
+   ${fnds.map(f=>`<tr class="clickrow" onclick="openFinding('${f.id}')"><td>${riskPill(f.risk_score)}</td><td class="tt">${f.title}</td><td>${sevP(f.severity)}</td><td class="mono">${f.cve||'—'}</td><td>${stP(f.status)}</td></tr>`).join('')}
+   </tbody></table></div>`:`<div style="color:var(--muted);font-size:12.5px;padding:6px 2px">${j.status==='running'?'Scanning… findings appear as it completes.':j.status==='blocked'?('Blocked: '+(j.status_reason||'authorization required')):'No findings recorded for this scan.'}</div>`}
+ </div>`;}
+function toggleScan(id){S.expandedScan=(S.expandedScan===id)?null:id;render();}
+function setScanAsset(v){S.scanAsset=v;render();}
+function setScanProfile(v){S.scanProfile=v;render();}
+async function viewReport(id){try{toast('Opening report…',true);const r=await fetch(API+'/scan-jobs/'+id+'/report.pdf',{headers:{authorization:'Bearer '+TOKEN}});if(!r.ok)throw new Error('failed');const blob=await r.blob();const u=URL.createObjectURL(blob);hideToast();window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000);}catch(e){toast('Report failed: '+shortErr(e));}}
 
 // ---- Scan detail: progress + steps + findings + PDF ----
 function stepIcon(st){if(st==='done')return `<span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${IC.checkline}</svg></span>`;
