@@ -181,19 +181,19 @@ const IC={dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="1
 const ic=(n,st)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="${st||''}">${IC[n]||''}</svg>`;
 
 // ---- Auth + API ----
-let TOKEN=localStorage.getItem('as_token')||'';
+let TOKEN='';
 let ME=null;
-async function loginReq(email,password){const r=await fetch(API+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password})});if(!r.ok)throw new Error('bad');return r.json();}
+async function loginReq(email,password){const r=await fetch(API+'/auth/login',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({email,password})});if(!r.ok)throw new Error('bad');return r.json();}
 async function api(p,opt={}){
- const r=await fetch(API+p,{method:opt.method||'GET',headers:{'content-type':'application/json',...(TOKEN?{authorization:'Bearer '+TOKEN}:{})},body:opt.body?JSON.stringify(opt.body):undefined});
+ const r=await fetch(API+p,{method:opt.method||'GET',credentials:'include',headers:{'content-type':'application/json',...(TOKEN?{authorization:'Bearer '+TOKEN}:{})},body:opt.body?JSON.stringify(opt.body):undefined});
  if(r.status===401){logout();throw new Error('unauthorized');}
  const t=await r.text();if(!r.ok)throw new Error(t||r.statusText);return t?JSON.parse(t):{};
 }
 const can=p=>ME&&ME.perms&&ME.perms.includes(p);
 async function doLogin(){const b=$('l_btn');b.disabled=true;$('l_err').textContent='';
- try{const res=await loginReq($('l_email').value.trim(),$('l_password').value);TOKEN=res.token;ME=res.user;localStorage.setItem('as_token',TOKEN);enterApp();}
+ try{const res=await loginReq($('l_email').value.trim(),$('l_password').value);TOKEN=res.token;ME=res.user;enterApp();}
  catch(e){$('l_err').textContent='Invalid email or password';}finally{b.disabled=false;}}
-function logout(){TOKEN='';ME=null;localStorage.removeItem('as_token');$('app').classList.add('hidden');$('login').classList.remove('hidden');}
+function logout(){TOKEN='';ME=null;try{fetch(API+'/auth/logout',{method:'POST',credentials:'include'}).catch(()=>{});}catch{}$('app').classList.add('hidden');$('login').classList.remove('hidden');}
 function enterApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden');
  $('u_nm').textContent=ME.name||ME.email;$('u_rl').textContent=ME.role;$('u_av').textContent=(ME.name||ME.email||'A').slice(0,1).toUpperCase();
  renderNav();loadAll();}
@@ -311,7 +311,7 @@ function scanExpand(j){const fnds=S.findings.filter(f=>f.scan_job_id===j.id);con
 function toggleScan(id){S.expandedScan=(S.expandedScan===id)?null:id;render();}
 function setScanAsset(v){S.scanAsset=v;render();}
 function setScanProfile(v){S.scanProfile=v;render();}
-async function viewReport(id){try{toast('Opening report…',true);const r=await fetch(API+'/scan-jobs/'+id+'/report.pdf',{headers:{authorization:'Bearer '+TOKEN}});if(!r.ok)throw new Error('failed');const blob=await r.blob();const u=URL.createObjectURL(blob);hideToast();window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000);}catch(e){toast('Report failed: '+shortErr(e));}}
+async function viewReport(id){try{toast('Opening report…',true);const r=await fetch(API+'/scan-jobs/'+id+'/report.pdf',{credentials:'include',headers:{authorization:'Bearer '+TOKEN}});if(!r.ok)throw new Error('failed');const blob=await r.blob();const u=URL.createObjectURL(blob);hideToast();window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000);}catch(e){toast('Report failed: '+shortErr(e));}}
 
 // ---- Scan detail: progress + steps + findings + PDF ----
 function stepIcon(st){if(st==='done')return `<span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${IC.checkline}</svg></span>`;
@@ -450,7 +450,7 @@ async function addUser(){const b={name:$('u_name').value.trim(),email:$('u_email
  if(!b.name||!b.email||b.password.length<8){toast('Name, email and an 8+ char password are required');return;}
  try{await api('/users',{method:'POST',body:b});closeModal();toast('User created');await loadUsers();}catch(e){toast('Could not create user: '+shortErr(e));}}
 async function downloadReport(id){try{toast('Generating PDF…',true);
-  const r=await fetch(API+'/scan-jobs/'+id+'/report.pdf',{headers:{authorization:'Bearer '+TOKEN}});
+  const r=await fetch(API+'/scan-jobs/'+id+'/report.pdf',{credentials:'include',headers:{authorization:'Bearer '+TOKEN}});
   if(!r.ok)throw new Error('report failed');const blob=await r.blob();const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='AntShield_VAPT_report.pdf';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);hideToast();
  }catch(e){toast('Report failed: '+shortErr(e));}}
@@ -477,7 +477,7 @@ function render(){if(!ME)return;renderNav();
 const _go=go;go=function(k){if(k==='users'){S.view=k;S.curAsset=null;S.curJob=null;loadUsers();}else if(k==='settings'){S.view=k;S.curAsset=null;S.curJob=null;loadSettings();}else _go(k);};
 
 // ---- Boot ----
-(async function(){if(TOKEN){try{ME=await api('/auth/me');enterApp();}catch{logout();}}else{logout();}})();
+(async function(){try{ME=await api('/auth/me');enterApp();}catch{$('app').classList.add('hidden');$('login').classList.remove('hidden');}})();
 
 // ---- Finding detail drawer + triage + import ----
 function riskPill(r){if(r==null)return '<span class="mono" style="color:var(--muted)">—</span>';const b=r>=80?'critical':r>=60?'high':r>=40?'medium':r>=20?'low':'info';return `<span class="pill p-${b}" title="Contextual risk (0-100) = CVSS + EPSS + KEV + asset criticality">${r}</span>`;}
@@ -544,7 +544,7 @@ async function delRole(id,name){if(!confirm('Delete role '+name+'?'))return;try{
 
 
 // ---- screenshots ----
-async function loadShot(path,elId){const el=$(elId);if(!el)return;try{const r=await fetch(API+path,{headers:{authorization:'Bearer '+TOKEN}});if(!r.ok){el.innerHTML='';return;}const b=await r.blob();const u=URL.createObjectURL(b);el.innerHTML=`<div class="card" style="padding:12px"><div class="chd" style="margin-bottom:8px"><h2>Screenshot</h2><span class="leg">captured during scan</span></div><img src="${u}" style="max-width:100%;max-height:340px;object-fit:contain;object-position:top;border-radius:8px;border:1px solid var(--line);display:block"/></div>`;}catch{el.innerHTML='';}}
+async function loadShot(path,elId){const el=$(elId);if(!el)return;try{const r=await fetch(API+path,{credentials:'include',headers:{authorization:'Bearer '+TOKEN}});if(!r.ok){el.innerHTML='';return;}const b=await r.blob();const u=URL.createObjectURL(b);el.innerHTML=`<div class="card" style="padding:12px"><div class="chd" style="margin-bottom:8px"><h2>Screenshot</h2><span class="leg">captured during scan</span></div><img src="${u}" style="max-width:100%;max-height:340px;object-fit:contain;object-position:top;border-radius:8px;border:1px solid var(--line);display:block"/></div>`;}catch{el.innerHTML='';}}
 // ---- authenticated-scan config ----
 async function openAuthModal(assetId){let cfg={method:'none'};try{cfg=await api('/assets/'+assetId+'/auth');}catch{}
  openModal(`<div class="mh">Authentication for active scans</div><div class="mb">

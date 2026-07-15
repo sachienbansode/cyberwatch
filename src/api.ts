@@ -16,6 +16,7 @@ import { createHash } from 'crypto';
 
 export function createApp() {
   const app = express();
+  app.set('trust proxy', 1);
   app.disable('x-powered-by');                       // remove tech banner (X-Powered-By: Express)
   app.use(express.json({ limit: '30mb' }));
 
@@ -46,9 +47,14 @@ export function createApp() {
   app.post('/api/v1/auth/login', async (req, res) => {
     const s = z.object({ email: z.string(), password: z.string() }).safeParse(req.body);
     if (!s.success) return res.status(400).json({ error: 'email and password required' });
-    try { res.json(await login(s.data.email, s.data.password)); }
-    catch { res.status(401).json({ error: 'invalid credentials' }); }
+    try {
+      const result = await login(s.data.email, s.data.password);
+      // httpOnly cookie: JavaScript can't read it, so XSS cannot exfiltrate the token
+      res.cookie('as_token', result.token, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 12 * 3600 * 1000, path: '/' });
+      res.json(result);
+    } catch { res.status(401).json({ error: 'invalid credentials' }); }
   });
+  app.post('/api/v1/auth/logout', (_req, res) => { res.clearCookie('as_token', { path: '/' }); res.json({ ok: true }); });
   app.get('/api/v1/auth/me', requireAuth(), (req: AuthedReq, res) => res.json(req.user));
 
   // ---- Assets ----

@@ -26,7 +26,12 @@ export async function login(email: string, password: string) {
 export function requireAuth(permission?: string) {
   return (req: AuthedReq, res: Response, next: NextFunction) => {
     const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+    let token = h.startsWith('Bearer ') ? h.slice(7) : '';
+    if (!token) {
+      const c = req.headers.cookie || '';
+      const found = c.split(';').map(s => s.trim()).find(s => s.startsWith('as_token='));
+      if (found) token = decodeURIComponent(found.slice('as_token='.length));
+    }
     if (!token) return res.status(401).json({ error: 'authentication required' });
     try {
       const p: any = jwt.verify(token, config.jwtSecret);
