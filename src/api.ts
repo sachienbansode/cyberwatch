@@ -16,7 +16,28 @@ import { createHash } from 'crypto';
 
 export function createApp() {
   const app = express();
+  app.disable('x-powered-by');                       // remove tech banner (X-Powered-By: Express)
   app.use(express.json({ limit: '30mb' }));
+
+  // ---- Security response headers (hardening) ----
+  app.use((_req, res, next) => {
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+    res.setHeader('Content-Security-Policy',
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; " +
+      "img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; connect-src 'self'");
+    next();
+  });
+
+  // ---- Vulnerability disclosure policy (RFC 9116) ----
+  app.get('/.well-known/security.txt', (_req, res) => {
+    res.type('text/plain').send('Contact: mailto:security@treeantstechnologies.com\nExpires: 2027-12-31T23:59:59Z\nPreferred-Languages: en\n');
+  });
+
   // public: web UI + health
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.get('/health', (_req, res) => res.json({ ok: true, activeScansEnabled: config.activeScansEnabled }));
