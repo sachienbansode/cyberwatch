@@ -32,8 +32,8 @@ export async function runJob(jobId: string) {
   const extraUrls: string[] = asset && asset.extra_urls ? asset.extra_urls : [];
 
   // build step plan (+ a final normalise step)
-  const steps = scanners.map(s => ({ key: s.key, name: NAMES[s.key] || s.key, status: 'pending', startedAt: null, finishedAt: null, findings: 0 }));
-  steps.push({ key: 'store', name: 'Normalise, score & store findings', status: 'pending', startedAt: null, finishedAt: null, findings: 0 });
+  const steps = scanners.map(s => ({ key: s.key, name: NAMES[s.key] || s.key, status: 'pending', startedAt: null as string | null, finishedAt: null as string | null, findings: 0, reason: '' }));
+  steps.push({ key: 'store', name: 'Normalise, score & store findings', status: 'pending', startedAt: null as string | null, finishedAt: null as string | null, findings: 0, reason: '' });
   const estimate = scanners.reduce((a, s) => a + (EST[s.key] || 30), 4);
   const totalSteps = steps.length;
 
@@ -62,14 +62,18 @@ export async function runJob(jobId: string) {
     steps[i].status = 'running'; steps[i].startedAt = new Date().toISOString();
     await saveSteps(jobId, steps, Math.round((i / totalSteps) * 100), steps[i].name);
     try {
-      if (!(await s.available())) { steps[i].status = 'skipped'; steps[i].finishedAt = new Date().toISOString(); continue; }
+      if (!(await s.available())) {
+        const hint: Record<string, string> = { nuclei: 'Nuclei not found on host — install it or set NUCLEI_BIN in .env', 'zap-baseline': 'OWASP ZAP not installed on host', 'zap-active': 'OWASP ZAP not installed on host', nmap: 'Nmap not installed on host', testssl: 'testssl.sh not installed on host' };
+        steps[i].status = 'skipped'; steps[i].reason = hint[s.key] || 'Scanner tool not available on host'; steps[i].finishedAt = new Date().toISOString();
+        await saveSteps(jobId, steps, Math.round(((i + 1) / totalSteps) * 100), null); continue;
+      }
       usedScanners.push(s.key);
       const fs = await s.run({ jobId, tenantId: job.tenant_id, assetId: job.asset_id, targetUrl: target, host, profile, auth: authCfg || { method: 'none' }, extraUrls });
       for (const f of fs) findings.push(enrich(f));
       steps[i].findings = fs.length;
       steps[i].status = 'done'; steps[i].finishedAt = new Date().toISOString();
     } catch (e: any) {
-      steps[i].status = 'skipped'; steps[i].finishedAt = new Date().toISOString();
+      steps[i].status = 'skipped'; steps[i].reason = 'Error: ' + (e.message || 'scanner failed'); steps[i].finishedAt = new Date().toISOString();
       await audit(job.tenant_id, 'scan-engine', 'scanner.error', 'scan_job', jobId, { scanner: s.key, error: e.message });
     }
     await saveSteps(jobId, steps, Math.round(((i + 1) / totalSteps) * 100), null);
