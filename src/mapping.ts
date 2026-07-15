@@ -15,6 +15,7 @@ const CATEGORY_REFS: Record<string, string[]> = {
   dependency: ['SEBI: GV.SC.S5 (SBOM)', 'RBI: Sec 13 (Patch mgmt)'],
   network:    ['SEBI: PR.NS', 'RBI: Sec 18/19'],
   info:       ['SEBI: ID.AM'],
+  secrets:    ['SEBI: PR.DS', 'RBI: Sec 16 (Cryptographic controls)'],
 };
 
 const IMPACT: Record<string, string> = {
@@ -27,6 +28,7 @@ const IMPACT: Record<string, string> = {
   network: 'Each internet-exposed service widens the attack surface and may be brute-forced, fingerprinted or exploited.',
   vulnerability: 'If exploited, this weakness could let an attacker compromise the confidentiality, integrity or availability of the application.',
   info: 'Informational finding — provides useful context with low direct risk.',
+  secrets: 'Exposed secrets can be extracted straight from the browser and used to access APIs, cloud accounts or data — often the fastest path to full compromise.',
 };
 export function enrich(f: Finding): Finding {
   if (!f.frameworkRefs || f.frameworkRefs.length === 0) {
