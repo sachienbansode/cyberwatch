@@ -1,0 +1,18 @@
+# Optional helpers for active scanning tools. The service itself runs via npm.
+# ZAP and Nuclei ship as containers so you don't have to install them on the host.
+services:
+  # OWASP ZAP baseline scan (run on demand):
+  #   docker compose run --rm zap zap-baseline.py -t https://your-site -J zap-report.json
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    volumes:
+      - ./:/zap/wrk:rw
+    entrypoint: [""]
+    command: ["sleep", "infinity"]
+
+  # Nuclei (run on demand):
+  #   docker compose run --rm nuclei -u https://your-site -jsonl
+  nuclei:
+    image: projectdiscovery/nuclei:latest
+    volumes:
+      - ./:/work:rw
