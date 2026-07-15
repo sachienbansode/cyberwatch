@@ -118,6 +118,11 @@ tbody td{padding:11px 16px;border-bottom:1px solid var(--line2)}tbody tr:last-ch
 .tl .ti{position:relative;padding-left:18px;padding-bottom:13px}.tl .ti::before{content:"";position:absolute;left:0;top:4px;width:8px;height:8px;border-radius:50%;background:var(--brand)}.tl .ti::after{content:"";position:absolute;left:3px;top:12px;bottom:-2px;width:2px;background:var(--line)}.tl .ti:last-child::after{display:none}
 .tl .tt2{font-size:12.5px;color:var(--ink)}.tl .tm{font-size:11px;color:var(--muted);margin-top:1px}
 .mini{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;font-family:inherit;color:var(--ink);outline:none}.mini:focus{border-color:var(--brand)}
+.klink{cursor:pointer;transition:box-shadow .15s,transform .15s}.klink:hover{box-shadow:var(--sh);transform:translateY(-1px)}
+.karr{color:var(--muted);font-size:15px;align-self:flex-start}
+.sevbar{cursor:pointer;padding:5px 6px;border-radius:8px;margin:3px -6px}.sevbar:hover{background:#F7F9FC}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+input.mini{background:#fff}
 </style>
 </head>
 <body>
@@ -193,7 +198,7 @@ function enterApp(){$('login').classList.add('hidden');$('app').classList.remove
  renderNav();loadAll();}
 
 // ---- State + helpers ----
-let S={view:'dashboard',assets:[],findings:[],jobs:[],findSev:'All',compFw:'All',curAsset:null,curJob:null,loading:true,err:null};
+let S={view:'dashboard',assets:[],findings:[],jobs:[],findSev:'All',compFw:'All',curAsset:null,curJob:null,loading:true,err:null,q:{},scanStatus:'All',findStatus:'All',focusId:null};
 const $=id=>document.getElementById(id);
 const byId=(a,id)=>a.find(x=>x.id===id);
 const assetName=id=>{const a=byId(S.assets,id);return a?a.name:(id||'').slice(0,8);};
@@ -224,33 +229,36 @@ function compDonut(){const met=OBLIGATIONS.filter(o=>o.status==='Met').length,pr
  const seg=[['Met',met,'#1E9E73'],['In progress',prog,'#F79A2B'],['Planned',plan,'#9AA7B5']];let off=0,r=52,circ=2*Math.PI*r,arcs='';
  seg.forEach(s=>{const f=s[1]/tot;arcs+=`<circle r="${r}" cx="70" cy="70" fill="none" stroke="${s[2]}" stroke-width="17" stroke-dasharray="${(f*circ).toFixed(1)} ${circ}" stroke-dashoffset="${(-off*circ).toFixed(1)}" transform="rotate(-90 70 70)"/>`;off+=f;});
  return `<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><svg width="140" height="140" viewBox="0 0 140 140"><circle r="52" cx="70" cy="70" fill="none" stroke="#EEF2F7" stroke-width="17"/>${arcs}<text x="70" y="66" text-anchor="middle" font-size="26" font-weight="600" fill="#233b57">${Math.round(met/tot*100)}%</text><text x="70" y="85" text-anchor="middle" font-size="10" fill="#8592A0">automated</text></svg><div style="flex:1;min-width:120px">${seg.map(s=>`<div style="display:flex;align-items:center;gap:8px;margin:7px 0;font-size:12.5px"><span class="sw" style="background:${s[2]}"></span><span style="flex:1">${s[0]}</span><b>${s[1]}</b></div>`).join('')}</div></div>`;}
-const kpi=(icn,tint,tcol,val,label)=>`<div class="card kpi"><div class="khead"><div class="kic" style="background:${tint};color:${tcol}">${ic(icn)}</div></div><div class="v">${val}</div><div class="l">${label}</div></div>`;
+const kpi=(icn,tint,tcol,val,label,onclick)=>`<div class="card kpi${onclick?' klink':''}" ${onclick?`onclick="${onclick}"`:''}><div class="khead"><div class="kic" style="background:${tint};color:${tcol}">${ic(icn)}</div>${onclick?'<span class="karr">\u2192</span>':''}</div><div class="v">${val}</div><div class="l">${label}</div></div>`;
 const emptyState=(icn,msg,btn)=>`<div class="empty">${ic(icn)}<div>${msg}</div>${btn?`<div style="margin-top:14px">${btn}</div>`:''}</div>`;
 function runBanner(){const j=runningJob();if(!j)return '';return `<div class="runbanner" onclick="openJob('${j.id}')"><span class="dot-run"></span><div class="rb"><div class="rp">Scan in progress — ${j.target_url} (v${j.version}) · ${j.progress||0}%</div><div class="rbar"><span style="width:${j.progress||2}%"></span></div></div><span class="btn sm sec">View</span></div>`;}
 
 // ---- Dashboard ----
-function vDashboard(){const c=sevCount();const ds=openF().filter(f=>f.due_at&&(new Date(f.due_at)-Date.now())/864e5<=7).length;
+function sevBars(c,tot){const max=Math.max(1,...Object.values(c));const col={Critical:'var(--red)',High:'var(--amber)',Medium:'#d1a92e',Low:'var(--green)',Info:'var(--slate)'};
+ return ['Critical','High','Medium','Low','Info'].map(k=>`<div class="sevbar" onclick="drillSev('${k}')" title="${c[k]} ${k} finding(s) — click to filter"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px"><span style="font-weight:600">${k}</span><span class="mono">${c[k]} · ${Math.round((c[k]/tot||0)*100)}%</span></div><div class="bar"><span style="width:${c[k]/max*100}%;background:${col[k]}"></span></div></div>`).join('');}
+function vDashboard(){const c=sevCount();const tot=openF().length;const ds=openF().filter(f=>f.due_at&&(new Date(f.due_at)-Date.now())/864e5<=7).length;
  return `${runBanner()}<div class="grid kpis">
-  ${kpi('assets','var(--blueS)','var(--blue)',S.assets.length,'Assets')}
-  ${kpi('alert','var(--redS)','var(--red)',openF().length,'Open findings')}
-  ${kpi('clock','var(--amberS)','var(--amber)',ds,'Due within 7 days')}
-  ${kpi('scan','var(--greenS)','var(--green)',S.jobs.length,'Scans run')}
-  ${kpi('check','var(--brandSoft)','var(--brandD)',Math.round(OBLIGATIONS.filter(o=>o.status==='Met').length/OBLIGATIONS.length*100)+'%','Compliance automated')}
+  ${kpi('assets','var(--blueS)','var(--blue)',S.assets.length,'Assets',"go('assets')")}
+  ${kpi('alert','var(--redS)','var(--red)',tot,'Open findings',"go('findings')")}
+  ${kpi('clock','var(--amberS)','var(--amber)',ds,'Due within 7 days',"drillSev('All')")}
+  ${kpi('scan','var(--greenS)','var(--green)',S.jobs.length,'Scans run',"go('scans')")}
+  ${kpi('check','var(--brandSoft)','var(--brandD)',Math.round(OBLIGATIONS.filter(o=>o.status==='Met').length/OBLIGATIONS.length*100)+'%','Compliance automated',"go('compliance')")}
  </div>
  <div class="row2" style="margin-top:16px">
-  <div class="card"><div class="chd"><h2>Open findings by severity</h2></div>${openF().length?barChart():emptyState('inbox','No open findings yet — run a scan.')}</div>
-  <div class="card"><div class="chd"><h2>RBI + SEBI mapping</h2></div>${compDonut()}</div>
+  <div class="card"><div class="chd"><h2>Open findings by severity</h2><span class="leg">click a bar to filter</span></div>${tot?sevBars(c,tot):emptyState('inbox','No open findings yet — run a scan or import results.')}</div>
+  <div class="card klink" onclick="go('compliance')"><div class="chd"><h2>RBI + SEBI mapping</h2><span class="leg">view →</span></div>${compDonut()}</div>
  </div>
  <div class="card tablecard" style="margin-top:16px"><div class="chd"><h2>Recent scans</h2><span class="leg">click a row for details</span></div>
   ${S.jobs.length?`<table><thead><tr><th>Target</th><th>Ver</th><th>Profile</th><th>Findings</th><th>Status</th><th>When</th></tr></thead><tbody>${S.jobs.slice(0,6).map(j=>`<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">${j.target_url}</td><td class="mono">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}</td><td class="mono">${fmt(j.queued_at)}</td></tr>`).join('')}</tbody></table>`:emptyState('scan','No scans yet.',can('scan:run')?'<button class="btn sm" onclick="openScanModal()">'+ic('plus')+'Run your first scan</button>':'')}
  </div>`;}
 
 // ---- Assets ----
-function vAssets(){return `${runBanner()}${can('asset:write')?`<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn sm" onclick="openAssetModal()">${ic('plus')}Add asset</button></div>`:''}
- <div class="card tablecard"><div class="chd"><h2>Asset inventory</h2><span class="leg">${S.assets.length} assets · click for scans</span></div>
- ${S.assets.length?`<table><thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Criticality</th><th>Scans</th><th></th></tr></thead><tbody>
- ${S.assets.map(a=>{const n=S.jobs.filter(j=>j.asset_id===a.id).length;return `<tr class="clickrow" onclick="openAsset('${a.id}')"><td class="tt">${a.name}</td><td class="mono">${a.base_url||'—'}</td><td>${a.type}</td><td>${sevP(a.criticality)}</td><td class="tt">${n}</td><td style="text-align:right">${can('scan:run')?`<button class="btn sm" onclick="event.stopPropagation();runScan('${a.id}','passive')">${ic('scan')}Scan</button>`:''}</td></tr>`;}).join('')}
- </tbody></table>`:emptyState('assets','No assets registered.',can('asset:write')?'<button class="btn sm" onclick="openAssetModal()">'+ic('plus')+'Add your website</button>':'')}</div>`;}
+function vAssets(){const q=(S.q.assets||'').toLowerCase();const list=S.assets.filter(a=>!q||a.name.toLowerCase().includes(q)||(a.base_url||'').toLowerCase().includes(q)||(a.type||'').toLowerCase().includes(q)||(a.criticality||'').toLowerCase().includes(q));
+ return `${runBanner()}<div class="toolbar"><input class="mini" id="q_assets" placeholder="Search assets…" value="${S.q.assets||''}" oninput="setQ('assets',this.value)" style="width:240px"/><div style="flex:1"></div>${can('asset:write')?`<button class="btn sm" onclick="openAssetModal()">${ic('plus')}Add asset</button>`:''}</div>
+ <div class="card tablecard"><div class="chd"><h2>Asset inventory</h2><span class="leg">${list.length} of ${S.assets.length} · click for scans</span></div>
+ ${list.length?`<table><thead><tr><th>Name</th><th>URL</th><th>Type</th><th>Criticality</th><th>Scans</th><th></th></tr></thead><tbody>
+ ${list.map(a=>{const n=S.jobs.filter(j=>j.asset_id===a.id).length;return `<tr class="clickrow" onclick="openAsset('${a.id}')"><td class="tt">${a.name}</td><td class="mono">${a.base_url||'—'}</td><td>${a.type}</td><td>${sevP(a.criticality)}</td><td class="tt">${n}</td><td style="text-align:right">${can('scan:run')?`<button class="btn sm" onclick="event.stopPropagation();runScan('${a.id}','passive')">${ic('scan')}Scan</button>`:''}</td></tr>`;}).join('')}
+ </tbody></table>`:emptyState('assets',S.assets.length?'No assets match your search.':'No assets registered.',can('asset:write')&&!S.assets.length?'<button class="btn sm" onclick="openAssetModal()">'+ic('plus')+'Add your website</button>':'')}</div>`;}
 
 // ---- Asset detail (scans below) ----
 function vAssetDetail(){const a=byId(S.assets,S.curAsset);if(!a)return emptyState('assets','Asset not found.');
@@ -264,40 +272,55 @@ function vAssetDetail(){const a=byId(S.assets,S.curAsset);if(!a)return emptyStat
  ${jobs.map(j=>{const d=j.started_at&&j.finished_at?dur((new Date(j.finished_at)-new Date(j.started_at))/1000):(j.status==='running'?'running…':'—');return `<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}</td><td class="mono">${fmtT(j.started_at||j.queued_at)}</td><td class="mono">${d}</td></tr>`;}).join('')}
  </tbody></table>`:emptyState('scan','No scans for this asset yet.',can('scan:run')?`<button class="btn sm" onclick="runScan('${a.id}','passive')">${ic('scan')}Run first scan</button>`:'')}</div>`;}
 // ---- Scans list ----
-function vScans(){return `${runBanner()}<div class="card tablecard"><div class="chd"><h2>Scan jobs</h2><span class="leg">click a row for progress & findings</span></div>
- ${S.jobs.length?`<table><thead><tr><th>Target</th><th>Ver</th><th>Profile</th><th>Findings</th><th>Status</th><th>Requested by</th><th>Queued</th></tr></thead><tbody>
- ${S.jobs.map(j=>`<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">${j.target_url}</td><td class="mono">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}${j.status_reason?` <span title="${j.status_reason}">⚑</span>`:''}</td><td class="mono">${j.requested_by||'—'}</td><td class="mono">${fmt(j.queued_at)}</td></tr>`).join('')}
- </tbody></table>`:emptyState('scan','No scan jobs yet.',can('scan:run')?'<button class="btn sm" onclick="openScanModal()">'+ic('plus')+'Run scan</button>':'')}
- <div class="hint">${ic('info')}<span>Passive scans are safe & non-intrusive. Baseline/active require ACTIVE_SCANS_ENABLED on the server and a stored authorization for the host.</span></div></div>`;}
+function vScans(){const q=(S.q.scans||'').toLowerCase();const st=S.scanStatus||'All';const statuses=['All','completed','running','queued','blocked','failed'];
+ let list=S.jobs.filter(j=>!q||j.target_url.toLowerCase().includes(q)||(j.profile||'').includes(q)||(j.requested_by||'').toLowerCase().includes(q)||(j.status||'').includes(q));
+ if(st!=='All')list=list.filter(j=>j.status===st);
+ return `${runBanner()}<div class="toolbar"><input class="mini" id="q_scans" placeholder="Search scans…" value="${S.q.scans||''}" oninput="setQ('scans',this.value)" style="width:220px"/><div class="seg">${statuses.map(s=>`<span class="s ${st===s?'on':''}" onclick="setScanStatus('${s}')">${cap(s)}</span>`).join('')}</div><span class="leg" style="margin-left:auto;color:var(--muted)">${list.length} scans</span></div>
+ <div class="card tablecard">${list.length?`<table><thead><tr><th>Target</th><th>Ver</th><th>Profile</th><th>Findings</th><th>Status</th><th>Requested by</th><th>Queued</th></tr></thead><tbody>
+ ${list.map(j=>`<tr class="clickrow" onclick="openJob('${j.id}')"><td class="tt">${j.target_url}</td><td class="mono">v${j.version}</td><td><span class="tag">${j.profile}</span></td><td class="tt">${(j.summary&&j.summary.total)??'—'}</td><td>${j.status==='running'||j.status==='queued'?`<span class="dot-run"></span> ${cap(j.status)} ${j.progress||0}%`:stP(j.status)}${j.status_reason?` <span title="${j.status_reason}">⚑</span>`:''}</td><td class="mono">${j.requested_by||'—'}</td><td class="mono">${fmt(j.queued_at)}</td></tr>`).join('')}
+ </tbody></table>`:emptyState('scan','No scans match.',can('scan:run')?'<button class="btn sm" onclick="openScanModal()">'+ic('plus')+'Run scan</button>':'')}
+ <div class="hint">${ic('info')}<span>Passive scans are safe & non-intrusive. Baseline/active require ACTIVE_SCANS_ENABLED and a stored authorization.</span></div></div>`;}
+
 // ---- Scan detail: progress + steps + findings + PDF ----
 function stepIcon(st){if(st==='done')return `<span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${IC.checkline}</svg></span>`;
  if(st==='running')return '<span class="si"><span class="spin"></span></span>';
  if(st==='skipped')return `<span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">${IC.x}</svg></span>`;
  return '<span class="si"></span>';}
 function vScanDetail(){const j=byId(S.jobs,S.curJob);if(!j)return emptyState('scan','Scan not found.');
- const steps=j.steps||[];const running=j.status==='running'||j.status==='queued';
+ const steps=j.steps||[];const running=j.status==='running'||j.status==='queued';const done=j.status==='completed';
+ const prog=done?100:(j.status==='blocked'||j.status==='failed'?(j.progress||0):(j.progress||0));
  const elapsed=j.started_at?((j.finished_at?new Date(j.finished_at):new Date())-new Date(j.started_at))/1000:0;
- const fnds=S.findings.filter(f=>f.scan_job_id===j.id);const c={Critical:0,High:0,Medium:0,Low:0,Info:0};fnds.forEach(f=>c[f.severity]=(c[f.severity]||0)+1);
+ const fnds=S.findings.filter(f=>f.scan_job_id===j.id);
+ let stepsHtml;
+ if(steps.length)stepsHtml=steps.map(s=>`<div class="step ${s.status}">${stepIcon(s.status)}<span class="sn">${s.name}</span><span class="sd">${s.status==='done'&&s.startedAt&&s.finishedAt?dur((new Date(s.finishedAt)-new Date(s.startedAt))/1000)+(s.findings?` · ${s.findings} found`:''):s.status==='running'?'running…':s.status==='skipped'?'skipped':'queued'}</span></div>`).join('');
+ else if(done)stepsHtml=`<div class="step done">${stepIcon('done')}<span class="sn">Scan completed — ${fnds.length} finding(s) recorded</span><span class="sd">step timeline not captured</span></div>`;
+ else if(j.status==='blocked'||j.status==='failed')stepsHtml=`<div class="step skipped">${stepIcon('skipped')}<span class="sn">${cap(j.status)}</span><span class="sd">${j.status_reason||''}</span></div>`;
+ else stepsHtml=`<div class="step running">${stepIcon('running')}<span class="sn">Preparing…</span><span class="sd">queued</span></div>`;
  return `<div class="back" onclick="openAsset('${j.asset_id}')">${ic('back')}Back to ${assetName(j.asset_id)}</div>
  <div class="dhdr"><h2>${assetName(j.asset_id)} — scan v${j.version}</h2></div>
  <div class="meta"><span>Target <b>${j.target_url}</b></span><span>Profile <b>${j.profile}</b></span><span>Status ${running?`<b>${cap(j.status)}</b>`:stP(j.status)}</span><span>Requested by <b>${j.requested_by||'—'}</b></span></div>
  <div class="progwrap">
-   <div class="progtop"><div class="progpct">${j.progress||0}%</div><div class="progbar"><span style="width:${Math.max(j.progress||0,2)}%"></span></div></div>
-   <div class="progtimes"><span>Started <b>${fmtT(j.started_at)}</b></span><span>${j.finished_at?'Finished':'Elapsed'} <b>${j.finished_at?fmtT(j.finished_at):dur(elapsed)}</b></span><span>Est. total <b>~${dur(j.estimated_seconds||0)}</b></span>${j.finished_at?`<span>Duration <b>${dur((new Date(j.finished_at)-new Date(j.started_at))/1000)}</b></span>`:''}</div>
-   <div class="steps">${steps.length?steps.map(s=>`<div class="step ${s.status}">${stepIcon(s.status)}<span class="sn">${s.name}</span><span class="sd">${s.status==='done'&&s.startedAt&&s.finishedAt?dur((new Date(s.finishedAt)-new Date(s.startedAt))/1000)+(s.findings?` · ${s.findings} found`:''):s.status==='running'?'running…':s.status==='skipped'?'skipped':'queued'}</span></div>`).join(''):'<div class="step pending"><span class="si"></span><span class="sn">Preparing…</span></div>'}</div>
+   <div class="progtop"><div class="progpct">${prog}%</div><div class="progbar"><span style="width:${Math.max(prog,2)}%"></span></div></div>
+   <div class="progtimes"><span>Started <b>${fmtT(j.started_at)}</b></span><span>${j.finished_at?'Finished':'Elapsed'} <b>${j.finished_at?fmtT(j.finished_at):dur(elapsed)}</b></span>${j.estimated_seconds?`<span>Est. total <b>~${dur(j.estimated_seconds)}</b></span>`:''}${j.finished_at&&j.started_at?`<span>Duration <b>${dur((new Date(j.finished_at)-new Date(j.started_at))/1000)}</b></span>`:''}</div>
+   <div class="steps">${stepsHtml}</div>
    ${j.status==='blocked'?`<div class="hint" style="margin:14px 0 0">${ic('info')}<span style="color:var(--red)">Blocked: ${j.status_reason||'authorization required'}</span></div>`:''}
  </div>
- <div style="display:flex;align-items:center;gap:10px;margin:18px 0 14px"><h2 style="font-size:15px;color:var(--navy);margin:0">Findings (${fnds.length})</h2><div style="flex:1"></div>${can('report:read')&&j.status==='completed'?`<button class="btn sm" onclick="downloadReport('${j.id}')">${ic('download')}Download PDF report</button>`:''}</div>
- <div class="card tablecard">${fnds.length?`<table><thead><tr><th>Finding</th><th>Severity</th><th>Category</th><th>Scanner</th><th>CVSS</th><th>Status</th></tr></thead><tbody>
- ${fnds.map(f=>`<tr><td class="tt">${f.title}</td><td>${sevP(f.severity)}</td><td><span class="tag">${f.category||'-'}</span></td><td class="mono">${f.scanner||'-'}</td><td class="tt">${f.cvss||'—'}</td><td>${stP(f.status)}</td></tr>`).join('')}
+ <div style="display:flex;align-items:center;gap:10px;margin:18px 0 14px"><h2 style="font-size:15px;color:var(--navy);margin:0">Findings (${fnds.length})</h2><div style="flex:1"></div>${can('report:read')&&done?`<button class="btn sm" onclick="downloadReport('${j.id}')">${ic('download')}Download PDF report</button>`:''}</div>
+ <div class="card tablecard">${fnds.length?`<table><thead><tr><th>Risk</th><th>Finding</th><th>Severity</th><th>Category</th><th>Scanner</th><th>CVE</th><th>Status</th></tr></thead><tbody>
+ ${fnds.map(f=>`<tr class="clickrow" onclick="openFinding('${f.id}')"><td>${riskPill(f.risk_score)}</td><td class="tt">${f.title}</td><td>${sevP(f.severity)}</td><td><span class="tag">${f.category||'-'}</span></td><td class="mono">${f.scanner||'-'}</td><td class="mono">${f.cve||'—'}</td><td>${stP(f.status)}</td></tr>`).join('')}
  </tbody></table>`:running?emptyState('scan','Scanning… findings will appear as steps complete.'):emptyState('check','No findings recorded for this scan.')}</div>`;}
 
 // ---- Findings ----
-function vFindings(){const sevs=['All','Critical','High','Medium','Low','Info'];const list=S.findings.filter(f=>S.findSev==='All'||f.severity===S.findSev);
- return `${runBanner()}<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px"><div class="seg">${sevs.map(s=>`<span class="s ${S.findSev===s?'on':''}" onclick="setSev('${s}')">${s}</span>`).join('')}</div><span class="leg" style="margin-left:auto;color:var(--muted)">${list.length} findings · click a row for details</span></div>
+function vFindings(){const sevs=['All','Critical','High','Medium','Low','Info'];const q=(S.q.findings||'').toLowerCase();const fst=S.findStatus||'All';
+ const fstatuses=['All','Open','Confirmed','In Progress','False Positive','Accepted Risk','Fixed','Retest','Closed'];
+ let list=S.findings.filter(f=>S.findSev==='All'||f.severity===S.findSev);
+ if(fst!=='All')list=list.filter(f=>f.status===fst);
+ if(q)list=list.filter(f=>(f.title||'').toLowerCase().includes(q)||assetName(f.asset_id).toLowerCase().includes(q)||(f.cve||'').toLowerCase().includes(q)||(f.category||'').toLowerCase().includes(q)||(f.source||'').toLowerCase().includes(q));
+ return `${runBanner()}<div class="toolbar"><div class="seg">${sevs.map(s=>`<span class="s ${S.findSev===s?'on':''}" onclick="setSev('${s}')">${s}</span>`).join('')}</div><input class="mini" id="q_findings" placeholder="Search title, asset, CVE…" value="${S.q.findings||''}" oninput="setQ('findings',this.value)" style="width:210px"/><select class="mini" onchange="setFindStatus(this.value)">${fstatuses.map(s=>`<option ${fst===s?'selected':''}>${s}</option>`).join('')}</select><span class="leg" style="margin-left:auto;color:var(--muted)">${list.length} findings</span></div>
  <div class="card tablecard">${list.length?`<table><thead><tr><th>Risk</th><th>Finding</th><th>Asset</th><th>Severity</th><th>CVE</th><th>Source</th><th>SLA due</th><th>Status</th>${can('finding:write')?'<th></th>':''}</tr></thead><tbody>
  ${list.map(f=>{const od=f.status!=='Closed'&&f.due_at&&(new Date(f.due_at)-Date.now())/864e5<=7;return `<tr class="clickrow" onclick="openFinding('${f.id}')"><td>${riskPill(f.risk_score)}</td><td class="tt">${f.title}${f.kev?' <span class="pill p-critical" style="padding:1px 6px">KEV</span>':''}</td><td>${assetName(f.asset_id)}</td><td>${sevP(f.severity)}</td><td class="mono">${f.cve||'—'}</td><td class="mono">${(f.source||'scanner').replace('import:','')}</td><td class="${od?'crit-txt':''}">${fmt(f.due_at)}</td><td>${stP(f.status)}</td>${can('finding:write')?`<td style="text-align:right" onclick="event.stopPropagation()">${f.status!=='Closed'?`<button class="btn sm gho" onclick="closeFinding('${f.id}')">Close</button>`:'—'}</td>`:''}</tr>`;}).join('')}
- </tbody></table>`:emptyState('inbox','No findings yet. Run a scan or import results from your scanner.')}</div>`;}
+ </tbody></table>`:emptyState('inbox','No findings match. Run a scan or import results.')}</div>`;}
+
 // ---- Remediation ----
 function vRemediation(){const open=openF().filter(f=>f.due_at).sort((a,b)=>new Date(a.due_at)-new Date(b.due_at));
  return `${runBanner()}<div class="card tablecard"><div class="chd">${ic('shield','width:18px;height:18px;stroke:var(--brand)')}<h2>Remediation SLAs</h2><span class="leg">high-sev 1 week · others 3 months</span></div>
@@ -344,14 +367,15 @@ function vHow(){return `<div class="doc">
 let USERS=[],ROLES=[];
 async function loadUsers(){try{[USERS,ROLES]=await Promise.all([api('/users'),api('/roles')]);}catch(e){USERS=[];ROLES=[];}render();}
 function vUsers(){if(!can('user:manage'))return emptyState('users','You do not have access to user management.');
- return `<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn sm" onclick="openUserModal()">${ic('plus')}Add user</button></div>
- <div class="card tablecard"><div class="chd">${ic('users','width:18px;height:18px;stroke:var(--brand)')}<h2>Users</h2><span class="leg">${USERS.length} users</span></div>
- ${USERS.length?`<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th></tr></thead><tbody>
- ${USERS.map(u=>`<tr><td class="tt">${u.name||'—'}</td><td class="mono">${u.email}</td><td><span class="tag">${u.role}</span></td><td>${u.status==='active'?'<span class="pill p-closed"><span class="pd"></span>Active</span>':'<span class="pill p-info">'+u.status+'</span>'}</td><td class="mono">${u.last_login_at?fmtT(u.last_login_at):'never'}</td></tr>`).join('')}
+ const uq=(S.q.users||'').toLowerCase();const users=USERS.filter(u=>!uq||(u.name||'').toLowerCase().includes(uq)||u.email.toLowerCase().includes(uq)||(u.role||'').toLowerCase().includes(uq));
+ return `<div class="toolbar"><input class="mini" id="q_users" placeholder="Search users…" value="${S.q.users||''}" oninput="setQ('users',this.value)" style="width:240px"/><div style="flex:1"></div><button class="btn sm" onclick="openUserModal()">${ic('plus')}Add user</button></div>
+ <div class="card tablecard"><div class="chd">${ic('users','width:18px;height:18px;stroke:var(--brand)')}<h2>Users</h2><span class="leg">${users.length} of ${USERS.length}</span></div>
+ ${USERS.length?`<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th><th></th></tr></thead><tbody>
+ ${users.map(u=>`<tr><td class="tt">${u.name||'—'}</td><td class="mono">${u.email}</td><td><span class="tag">${u.role}</span></td><td>${u.status==='active'?'<span class="pill p-closed"><span class="pd"></span>Active</span>':'<span class="pill p-info">'+u.status+'</span>'}</td><td class="mono">${u.last_login_at?fmtT(u.last_login_at):'never'}</td><td style="text-align:right;white-space:nowrap"><button class="btn sm gho" onclick="openEditUser('${u.id}')">Edit</button> <button class="btn sm gho" onclick="openResetPw('${u.id}')">Reset PW</button> <button class="btn sm gho" onclick="delUser('${u.id}','${u.email}')">Delete</button></td></tr>`).join('')}
  </tbody></table>`:'<div class="empty">Loading users…</div>'}</div>
- <div class="card" style="margin-top:16px"><div class="chd"><h2>Roles & permissions</h2></div>
- <table><thead><tr><th>Role</th><th>Description</th><th>Permissions</th></tr></thead><tbody>
- ${ROLES.map(r=>`<tr><td class="tt">${r.name}</td><td>${r.description||''}</td><td>${(r.permissions||[]).map(p=>`<span class="tag" style="margin:2px">${p}</span>`).join(' ')}</td></tr>`).join('')}
+ <div class="card" style="margin-top:16px"><div class="chd"><h2>Roles & permissions</h2><div style="flex:1"></div><button class="btn sm sec" onclick="openRoleModal()">${ic('plus')}New role</button></div>
+ <table><thead><tr><th>Role</th><th>Description</th><th>Permissions</th><th></th></tr></thead><tbody>
+ ${ROLES.map(r=>`<tr><td class="tt">${r.name}</td><td>${r.description||''}</td><td>${(r.permissions||[]).map(p=>`<span class="tag" style="margin:2px">${p}</span>`).join(' ')}</td><td style="text-align:right;white-space:nowrap"><button class="btn sm gho" onclick="openRoleModal('${r.id}')">Edit</button> <button class="btn sm gho" onclick="delRole('${r.id}','${r.name}')">Delete</button></td></tr>`).join('')}
  </tbody></table></div>`;}
 
 const VIEWS={dashboard:vDashboard,assets:vAssets,assetDetail:vAssetDetail,scans:vScans,scanDetail:vScanDetail,findings:vFindings,remediation:vRemediation,compliance:vCompliance,howitworks:vHow,users:vUsers};
@@ -413,6 +437,7 @@ function render(){if(!ME)return;renderNav();
  if(S.loading){$('view').innerHTML=emptyState('refresh','Connecting to cyberwatch…');return;}
  if(S.err){$('view').innerHTML=`<div class="card"><div class="empty">${ic('alert')}<div>Couldn't reach the API.</div><div class="mono" style="margin-top:8px">${S.err}</div><div style="margin-top:14px"><button class="btn sm" onclick="loadAll(true)">Retry</button></div></div></div>`;return;}
  $('view').innerHTML=(VIEWS[S.view]||vDashboard)();
+ if(S.focusId){const el=$(S.focusId);if(el){const v=el.value;el.focus();el.value='';el.value=v;}S.focusId=null;}
 }
 const _go=go;go=function(k){if(k==='users'){S.view=k;S.curAsset=null;S.curJob=null;loadUsers();}else _go(k);};
 
@@ -452,6 +477,33 @@ async function doImport(assetId){const fi=$('im_file');if(!fi.files||!fi.files.l
  const file=fi.files[0];const content=await file.text();const fmt=$('im_fmt').value;
  try{toast('Importing…',true);const r=await api('/assets/'+assetId+'/imports',{method:'POST',body:{format:fmt||undefined,filename:file.name,content}});closeModal();hideToast();toast(`Imported ${r.imported} findings from ${r.source}`);await loadAll();}
  catch(e){toast('Import failed: '+shortErr(e));}}
+
+
+// ---- search / filter / drilldown ----
+const PERMS=['asset:read','asset:write','scan:read','scan:run','finding:read','finding:write','report:read','user:manage'];
+function setQ(view,val){S.q=S.q||{};S.q[view]=val;S.focusId='q_'+view;render();}
+function drillSev(s){S.findSev=s;S.q=S.q||{};S.q.findings='';go('findings');}
+function setScanStatus(s){S.scanStatus=s;render();}
+function setFindStatus(s){S.findStatus=s;render();}
+// ---- user CRUD ----
+function openEditUser(id){const u=USERS.find(x=>x.id===id);if(!u)return;openModal(`<div class="mh">Edit user</div><div class="mb">
+ <div class="fld"><label>Name</label><input id="eu_name" value="${u.name||''}"/></div>
+ <div class="fld"><label>Role</label><select id="eu_role">${ROLES.map(r=>`<option ${r.name===u.role?'selected':''}>${r.name}</option>`).join('')}</select></div>
+ <div class="fld"><label>Status</label><select id="eu_status"><option value="active" ${u.status==='active'?'selected':''}>active</option><option value="disabled" ${u.status==='disabled'?'selected':''}>disabled</option></select></div>
+ </div><div class="mf"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveUser('${id}')">Save changes</button></div>`);}
+async function saveUser(id){const b={name:$('eu_name').value.trim(),role:$('eu_role').value,status:$('eu_status').value};try{await api('/users/'+id,{method:'PATCH',body:b});closeModal();toast('User updated');await loadUsers();}catch(e){toast('Update failed: '+shortErr(e));}}
+function openResetPw(id){const u=USERS.find(x=>x.id===id);openModal(`<div class="mh">Reset password</div><div class="mb"><p style="color:var(--muted);font-size:12.5px;margin-top:0">Set a new password for <b>${u?u.email:''}</b>.</p><div class="fld"><label>New password</label><input id="rp_pw" type="text" placeholder="min 8 characters"/></div></div><div class="mf"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="doResetPw('${id}')">Reset password</button></div>`);}
+async function doResetPw(id){const pw=$('rp_pw').value;if(pw.length<8){toast('Password must be at least 8 characters');return;}try{await api('/users/'+id+'/password',{method:'POST',body:{password:pw}});closeModal();toast('Password reset');}catch(e){toast('Reset failed: '+shortErr(e));}}
+async function delUser(id,email){if(!confirm('Delete user '+email+'? This cannot be undone.'))return;try{await api('/users/'+id,{method:'DELETE'});toast('User deleted');await loadUsers();}catch(e){toast('Delete failed: '+shortErr(e));}}
+// ---- role CRUD ----
+function openRoleModal(id){const r=id?ROLES.find(x=>x.id===id):null;openModal(`<div class="mh">${r?'Edit role':'New role'}</div><div class="mb">
+ <div class="fld"><label>Name</label><input id="rl_name" value="${r?r.name:''}" ${r?'disabled':''}/></div>
+ <div class="fld"><label>Description</label><input id="rl_desc" value="${r?(r.description||''):''}"/></div>
+ <div class="fld"><label>Permissions</label><div style="display:flex;flex-direction:column;gap:7px;margin-top:5px">${PERMS.map(p=>`<label style="display:flex;align-items:center;gap:9px;font-weight:400;font-size:12.5px;color:var(--ink);cursor:pointer"><input type="checkbox" class="rl_perm" value="${p}" ${r&&(r.permissions||[]).includes(p)?'checked':''}/> <span class="mono">${p}</span></label>`).join('')}</div></div>
+ </div><div class="mf"><button class="btn sec" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveRole(${id?`'${id}'`:'null'})">Save role</button></div>`);}
+async function saveRole(id){const perms=[...document.querySelectorAll('.rl_perm:checked')].map(x=>x.value);const desc=$('rl_desc').value.trim();
+ try{if(id){await api('/roles/'+id,{method:'PATCH',body:{description:desc,permissions:perms}});}else{const name=$('rl_name').value.trim();if(!name){toast('Role name required');return;}await api('/roles',{method:'POST',body:{name,description:desc,permissions:perms}});}closeModal();toast('Role saved');await loadUsers();}catch(e){toast('Save failed: '+shortErr(e));}}
+async function delRole(id,name){if(!confirm('Delete role '+name+'?'))return;try{await api('/roles/'+id,{method:'DELETE'});toast('Role deleted');await loadUsers();}catch(e){toast('Delete failed: '+shortErr(e));}}
 
 </script>
 </body>

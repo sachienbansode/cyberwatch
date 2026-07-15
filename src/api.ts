@@ -196,5 +196,62 @@ export function createApp() {
     } catch (e: any) { res.status(409).json({ error: 'email already exists' }); }
   });
 
+
+  // ---- User CRUD (admin) ----
+  app.patch('/api/v1/users/:id', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const s = z.object({ name: z.string().optional(), role: z.string().optional(), status: z.enum(['active','disabled']).optional() }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    const b = s.data;
+    if (req.params.id === req.user!.id && b.status === 'disabled') return res.status(400).json({ error: 'cannot disable your own account' });
+    let roleId: string | null = null;
+    if (b.role) { const [r] = await query<any>('SELECT id FROM identity.roles WHERE name=$1', [b.role]); if (!r) return res.status(400).json({ error: 'unknown role' }); roleId = r.id; }
+    const [row] = await query('UPDATE identity.users SET name=coalesce($3,name), role_id=coalesce($4,role_id), status=coalesce($5,status) WHERE id=$1 AND tenant_id=$2 RETURNING id',
+      [req.params.id, req.user!.tenant, b.name || null, roleId, b.status || null]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await audit(req.user!.tenant, req.user!.email, 'user.updated', 'user', req.params.id, b);
+    res.json({ ok: true });
+  });
+  app.post('/api/v1/users/:id/password', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const s = z.object({ password: z.string().min(8) }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: 'password must be at least 8 characters' });
+    const hash = await bcrypt.hash(s.data.password, 10);
+    const [row] = await query('UPDATE identity.users SET password_hash=$3 WHERE id=$1 AND tenant_id=$2 RETURNING id', [req.params.id, req.user!.tenant, hash]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await audit(req.user!.tenant, req.user!.email, 'user.password_reset', 'user', req.params.id, {});
+    res.json({ ok: true });
+  });
+  app.delete('/api/v1/users/:id', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    if (req.params.id === req.user!.id) return res.status(400).json({ error: 'cannot delete your own account' });
+    await query('DELETE FROM identity.users WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    await audit(req.user!.tenant, req.user!.email, 'user.deleted', 'user', req.params.id, {});
+    res.json({ ok: true });
+  });
+
+  // ---- Role CRUD (admin) ----
+  app.post('/api/v1/roles', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const s = z.object({ name: z.string().min(2), description: z.string().optional(), permissions: z.array(z.string()) }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    try {
+      const [row] = await query<any>('INSERT INTO identity.roles(name,description,permissions) VALUES ($1,$2,$3) RETURNING *', [s.data.name, s.data.description || null, s.data.permissions]);
+      await audit(req.user!.tenant, req.user!.email, 'role.created', 'role', row.id, { name: s.data.name });
+      res.status(201).json(row);
+    } catch { res.status(409).json({ error: 'role name already exists' }); }
+  });
+  app.patch('/api/v1/roles/:id', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const s = z.object({ description: z.string().optional(), permissions: z.array(z.string()).optional() }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    const [row] = await query('UPDATE identity.roles SET description=coalesce($2,description), permissions=coalesce($3,permissions) WHERE id=$1 RETURNING id', [req.params.id, s.data.description || null, s.data.permissions || null]);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    await audit(req.user!.tenant, req.user!.email, 'role.updated', 'role', req.params.id, {});
+    res.json({ ok: true });
+  });
+  app.delete('/api/v1/roles/:id', requireAuth('user:manage'), async (req: AuthedReq, res) => {
+    const [u] = await query<any>('SELECT count(*)::int n FROM identity.users WHERE role_id=$1', [req.params.id]);
+    if (u.n > 0) return res.status(409).json({ error: `role is in use by ${u.n} user(s)` });
+    await query('DELETE FROM identity.roles WHERE id=$1', [req.params.id]);
+    await audit(req.user!.tenant, req.user!.email, 'role.deleted', 'role', req.params.id, {});
+    res.json({ ok: true });
+  });
+
   return app;
 }
