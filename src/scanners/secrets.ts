@@ -1,4 +1,5 @@
 import { Scanner, ScanContext, Finding, Severity } from '../types';
+import { config } from '../config';
 const _fetch: any = (globalThis as any).fetch;
 const UA = 'AntShield-VAPT/1.0';
 
@@ -60,15 +61,42 @@ export const secretsScanner: Scanner = {
       try { const r = await _fetch(u, { redirect: 'follow', headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.text() : ''; }
       catch { return ''; }
     };
-    const html = await get(ctx.targetUrl);
+    const host = ctx.host;
+    const maxPages = config.crawlMaxPages || 25;
     const out: Finding[] = [];
-    out.push(...scanSecrets(html, ctx.targetUrl));
-    // same-origin script sources
-    const scripts = new Set<string>(); const re = /<script[^>]+src=["']([^"']+)["']/gi; let m;
-    while ((m = re.exec(html)) !== null && scripts.size < 15) {
-      try { const u = new URL(m[1], ctx.targetUrl); if (u.hostname === ctx.host) scripts.add(u.toString()); } catch { /* */ }
+    const seen = new Set<string>(); const jsSeen = new Set<string>();
+    const queue: string[] = [ctx.targetUrl, ...(ctx.extraUrls || [])];
+
+    // discover URLs from robots.txt and sitemap.xml (finds pages not linked from the homepage)
+    try {
+      const robots = await get(new URL('/robots.txt', ctx.targetUrl).toString());
+      const sitemaps = [...robots.matchAll(/sitemap:\s*(\S+)/gi)].map(m => m[1]);
+      sitemaps.push(new URL('/sitemap.xml', ctx.targetUrl).toString());
+      for (const sm of sitemaps.slice(0, 2)) {
+        const xml = await get(sm);
+        for (const m of xml.matchAll(/<loc>([^<]+)<\/loc>/gi)) { try { if (new URL(m[1]).hostname === host) queue.push(m[1]); } catch { /* */ } }
+      }
+    } catch { /* discovery best-effort */ }
+
+    // crawl same-origin pages, scan each page's HTML + linked JS
+    let pages = 0;
+    while (queue.length && pages < maxPages) {
+      const u = queue.shift()!; if (seen.has(u)) continue; seen.add(u);
+      const html = await get(u); if (!html) continue; pages++;
+      out.push(...scanSecrets(html, u));
+      for (const m of html.matchAll(/href=["']([^"'#?]+)["']/gi)) {
+        try { const l = new URL(m[1], u); l.hash = ''; if (l.hostname === host && !seen.has(l.toString()) && queue.length < 300) queue.push(l.toString()); } catch { /* */ }
+      }
+      for (const m of html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)) {
+        try {
+          const j = new URL(m[1], u).toString();
+          if (new URL(j).hostname === host && !jsSeen.has(j) && jsSeen.size < 60) { jsSeen.add(j); const js = await get(j); if (js) out.push(...scanSecrets(js, j)); }
+        } catch { /* */ }
+      }
     }
-    for (const s of scripts) { const js = await get(s); if (js) out.push(...scanSecrets(js, s)); }
-    return out;
+    // de-duplicate identical secrets across pages
+    const uniq = new Map<string, Finding>();
+    for (const f of out) { const k = f.title + '|' + ((f.evidence as any)?.match || '') + '|' + ((f.evidence as any)?.url || ''); if (!uniq.has(k)) uniq.set(k, f); }
+    return [...uniq.values()];
   },
 };
