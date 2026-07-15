@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pool } from './db';
 
-const files = ['01_schemas.sql', '02_vapt_tables.sql', 'seed.sql', '04_auth_progress.sql'];
+const files = ['01_schemas.sql', '02_vapt_tables.sql', 'seed.sql', '04_auth_progress.sql', '05_vulnmgmt.sql'];
 // 03_rls.sql is intentionally NOT auto-applied — enable it explicitly when ready.
 
 async function main() {

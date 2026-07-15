@@ -6,10 +6,14 @@ import { query, audit } from './db';
 import { config } from './config';
 import { login, requireAuth, AuthedReq } from './auth';
 import { streamReport } from './report';
+import { detectFormat, parseImport } from './importers';
+import { enrichFinding } from './enrich';
+import { enrich as mapRefs, slaDays } from './mapping';
+import { createHash } from 'crypto';
 
 export function createApp() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '30mb' }));
   // public: web UI + health
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.get('/health', (_req, res) => res.json({ ok: true, activeScansEnabled: config.activeScansEnabled }));
@@ -92,11 +96,73 @@ export function createApp() {
     res.json(await query(sql, params));
   });
   app.patch('/api/v1/findings/:id', requireAuth('finding:write'), async (req: AuthedReq, res) => {
-    const s = z.object({ status: z.enum(['Open','In Progress','Closed','Accepted Risk']) }).safeParse(req.body);
+    const s = z.object({ status: z.enum(['Open','Confirmed','In Progress','False Positive','Accepted Risk','Fixed','Retest','Closed']).optional(),
+      owner: z.string().optional(), severity: z.enum(['Critical','High','Medium','Low','Info']).optional() }).safeParse(req.body);
     if (!s.success) return res.status(400).json({ error: s.error.flatten() });
-    const [row] = await query('UPDATE vapt.findings SET status=$3 WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, req.user!.tenant, s.data.status]);
-    if (!row) return res.status(404).json({ error: 'not found' });
-    await audit(req.user!.tenant, req.user!.email, 'finding.updated', 'finding', req.params.id, { status: s.data.status });
+    const [cur] = await query<any>('SELECT * FROM vapt.findings WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!cur) return res.status(404).json({ error: 'not found' });
+    const b = s.data;
+    const [row] = await query('UPDATE vapt.findings SET status=coalesce($3,status), owner=coalesce($4,owner), severity=coalesce($5,severity) WHERE id=$1 AND tenant_id=$2 RETURNING *',
+      [req.params.id, req.user!.tenant, b.status || null, b.owner || null, b.severity || null]);
+    const ev = (type: string, detail: any) => query('INSERT INTO vapt.finding_events(tenant_id,finding_id,actor,type,detail) VALUES ($1,$2,$3,$4,$5)', [req.user!.tenant, req.params.id, req.user!.email, type, detail]);
+    if (b.status && b.status !== cur.status) await ev('status', { from: cur.status, to: b.status });
+    if (b.owner) await ev('owner', { owner: b.owner });
+    await audit(req.user!.tenant, req.user!.email, 'finding.updated', 'finding', req.params.id, b);
+    res.json(row);
+  });
+
+
+  // ---- Scanner import (Nessus / Nmap / ZAP / Burp / SARIF) ----
+  app.post('/api/v1/assets/:id/imports', requireAuth('finding:write'), async (req: AuthedReq, res) => {
+    const s = z.object({ format: z.enum(['nessus','nmap','zap','burp','sarif']).optional(), filename: z.string().optional(), content: z.string().min(1) }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    const [asset] = await query<any>('SELECT * FROM asset.assets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!asset) return res.status(404).json({ error: 'asset not found' });
+    const fmt = s.data.format || detectFormat(s.data.content);
+    if (!fmt) return res.status(400).json({ error: 'could not auto-detect format; please specify one' });
+    let findings; try { findings = parseImport(fmt, s.data.content); } catch (e: any) { return res.status(400).json({ error: 'parse failed: ' + e.message }); }
+    const host = (() => { try { return new URL(asset.base_url).hostname; } catch { return asset.name; } })();
+    const [imp] = await query<any>('INSERT INTO vapt.imports(tenant_id,asset_id,source,filename,findings_count,imported_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+      [req.user!.tenant, asset.id, fmt, s.data.filename || null, findings.length, req.user!.email]);
+    const counts: any = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
+    for (const f of findings) {
+      mapRefs(f); counts[f.severity] = (counts[f.severity] || 0) + 1;
+      const fp = createHash('sha1').update(`${f.scanner}|${f.category}|${f.title}|${host}`).digest('hex');
+      const due = new Date(Date.now() + slaDays(f.severity) * 86400000);
+      await query(`INSERT INTO vapt.findings (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,cve,cvss_vector,refs,source)
+        VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        ON CONFLICT (asset_id,fingerprint) DO UPDATE SET last_seen=now(), severity=EXCLUDED.severity, description=EXCLUDED.description`,
+        [req.user!.tenant, asset.id, fp, f.title, f.description || null, f.remediation || null, f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, f.cve || null, f.cvssVector || null, f.refs || [], f.source || ('import:' + fmt)]);
+    }
+    await audit(req.user!.tenant, req.user!.email, 'findings.imported', 'import', imp.id, { source: fmt, count: findings.length });
+    res.status(201).json({ importId: imp.id, source: fmt, imported: findings.length, bySeverity: counts });
+  });
+  app.get('/api/v1/imports', requireAuth('finding:read'), async (req: AuthedReq, res) => {
+    const p: any[] = [req.user!.tenant]; let sql = 'SELECT * FROM vapt.imports WHERE tenant_id=$1';
+    if (req.query.assetId) { p.push(req.query.assetId); sql += ` AND asset_id=$${p.length}`; }
+    sql += ' ORDER BY created_at DESC LIMIT 100'; res.json(await query(sql, p));
+  });
+
+  // ---- Finding detail, history, comments, enrichment ----
+  app.get('/api/v1/findings/:id', requireAuth('finding:read'), async (req: AuthedReq, res) => {
+    const [f] = await query('SELECT * FROM vapt.findings WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!f) return res.status(404).json({ error: 'not found' }); res.json(f);
+  });
+  app.get('/api/v1/findings/:id/events', requireAuth('finding:read'), async (req: AuthedReq, res) => {
+    res.json(await query('SELECT * FROM vapt.finding_events WHERE finding_id=$1 ORDER BY ts', [req.params.id]));
+  });
+  app.post('/api/v1/findings/:id/events', requireAuth('finding:write'), async (req: AuthedReq, res) => {
+    const s = z.object({ comment: z.string().min(1) }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: 'comment required' });
+    await query('INSERT INTO vapt.finding_events(tenant_id,finding_id,actor,type,detail) VALUES ($1,$2,$3,$4,$5)', [req.user!.tenant, req.params.id, req.user!.email, 'comment', { comment: s.data.comment }]);
+    res.status(201).json({ ok: true });
+  });
+  app.post('/api/v1/findings/:id/enrich', requireAuth('finding:write'), async (req: AuthedReq, res) => {
+    const [f] = await query<any>('SELECT f.*, a.criticality FROM vapt.findings f JOIN asset.assets a ON a.id=f.asset_id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!f) return res.status(404).json({ error: 'not found' });
+    const en = await enrichFinding({ cve: f.cve, cvss: f.cvss ? Number(f.cvss) : undefined, severity: f.severity }, f.criticality);
+    const [row] = await query('UPDATE vapt.findings SET epss=$3, kev=$4, risk_score=$5 WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, req.user!.tenant, en.epss, en.kev, en.risk_score]);
+    await query('INSERT INTO vapt.finding_events(tenant_id,finding_id,actor,type,detail) VALUES ($1,$2,$3,$4,$5)', [req.user!.tenant, req.params.id, req.user!.email, 'enrich', en]);
     res.json(row);
   });
 

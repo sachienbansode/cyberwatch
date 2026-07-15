@@ -5,3 +5,7 @@ dist/
 zap-report.json
 testssl.json
 *.tmp
+
+# scratch/test files
+_*
+*.tmp

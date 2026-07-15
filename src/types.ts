@@ -12,6 +12,10 @@ export interface Finding {
   scanner: string;
   evidence?: Record<string, any>;
   frameworkRefs?: string[];         // filled by mapping if omitted
+  cve?: string;
+  cvssVector?: string;
+  refs?: string[];
+  source?: string;                  // scanner | import:<tool> | manual
 }
 
 export interface ScanContext {

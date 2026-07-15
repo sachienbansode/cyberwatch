@@ -69,7 +69,7 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
     doc.roundedRect(54, yy, 60, 16, 4).fill(sevColor[f.severity] || MUTED);
     doc.fillColor('#fff').fontSize(8).font('Helvetica-Bold').text(f.severity.toUpperCase(), 54, yy+4, { width: 60, align: 'center' });
     doc.fillColor(NAVY).fontSize(11).font('Helvetica-Bold').text(`${i+1}. ${f.title}`, 122, yy);
-    doc.fillColor(MUTED).fontSize(9).font('Helvetica').text(`${f.category || '-'}${f.cvss ? '  •  CVSS '+f.cvss : ''}${f.cwe ? '  •  '+f.cwe : ''}  •  ${(f.framework_refs||[]).join('  •  ')}`, 122);
+    doc.fillColor(MUTED).fontSize(9).font('Helvetica').text(`${f.category || '-'}${f.cvss ? '  •  CVSS '+f.cvss : ''}${f.cve ? '  •  '+f.cve : ''}${f.risk_score != null ? '  •  Risk '+f.risk_score : ''}${f.kev ? '  •  KEV' : ''}${f.cwe ? '  •  '+f.cwe : ''}  •  ${(f.framework_refs||[]).join('  •  ')}`, 122);
     if (f.description) doc.fillColor('#333').fontSize(9.5).font('Helvetica').text(f.description, 122, undefined, { width: 419 });
     if (f.remediation) { doc.fillColor(BRAND).fontSize(9).font('Helvetica-Bold').text('Recommendation: ', 122, undefined, { continued: true }); doc.fillColor('#333').font('Helvetica').text(f.remediation, { width: 419 }); }
     doc.moveDown(0.8);
