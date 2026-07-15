@@ -16,6 +16,7 @@ export interface Finding {
   cvssVector?: string;
   refs?: string[];
   source?: string;                  // scanner | import:<tool> | manual
+  impact?: string;                  // business/security implication
 }
 
 export interface AuthConfig { method: string; loginUrl?: string; username?: string; secret?: string; extra?: any; }

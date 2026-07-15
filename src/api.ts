@@ -159,10 +159,10 @@ export function createApp() {
       const fp = createHash('sha1').update(`${f.scanner}|${f.category}|${f.title}|${host}`).digest('hex');
       const due = new Date(Date.now() + slaDaysFor(slaPolicy, f.severity, asset.criticality) * 86400000);
       const risk = riskScore({ cvss: f.cvss, severity: f.severity, epss: null, kev: false, assetCriticality: asset.criticality });
-      await query(`INSERT INTO vapt.findings (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,cve,cvss_vector,refs,source,risk_score)
-        VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-        ON CONFLICT (asset_id,fingerprint) DO UPDATE SET last_seen=now(), severity=EXCLUDED.severity, description=EXCLUDED.description, risk_score=EXCLUDED.risk_score`,
-        [req.user!.tenant, asset.id, fp, f.title, f.description || null, f.remediation || null, f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, f.cve || null, f.cvssVector || null, f.refs || [], f.source || ('import:' + fmt), risk]);
+      await query(`INSERT INTO vapt.findings (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,cve,cvss_vector,refs,source,risk_score,impact)
+        VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        ON CONFLICT (asset_id,fingerprint) DO UPDATE SET last_seen=now(), severity=EXCLUDED.severity, description=EXCLUDED.description, risk_score=EXCLUDED.risk_score, impact=EXCLUDED.impact`,
+        [req.user!.tenant, asset.id, fp, f.title, f.description || null, f.remediation || null, f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, f.cve || null, f.cvssVector || null, f.refs || [], f.source || ('import:' + fmt), risk, f.impact || null]);
     }
     await audit(req.user!.tenant, req.user!.email, 'findings.imported', 'import', imp.id, { source: fmt, count: findings.length });
     res.status(201).json({ importId: imp.id, source: fmt, imported: findings.length, bySeverity: counts });
@@ -216,7 +216,7 @@ export function createApp() {
     if (!f) return res.status(404).json({ error: 'not found' });
     const url = f.evidence && f.evidence.url;
     let row: any;
-    if (url) [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 AND caption=$2 ORDER BY created_at DESC LIMIT 1', [f.scan_job_id, url]);
+    if (url) [row] = await query<any>("SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 AND caption=$2 AND kind <> 'asset' ORDER BY created_at DESC LIMIT 1", [f.scan_job_id, url]);
     if (!row) [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE finding_id=$1 LIMIT 1', [req.params.id]);
     await sendShot(row, res);
   });

@@ -17,22 +17,29 @@ function run(cmd: string, args: string[], timeoutMs: number): Promise<{ code: nu
   });
 }
 const _binCache: Record<string, string | null> = {};
-function binCandidates(bin: string): string[] {
-  const home = process.env.HOME || '/root';
-  return ['/usr/local/bin/' + bin, '/usr/bin/' + bin, '/bin/' + bin, '/snap/bin/' + bin,
-    '/usr/local/go/bin/' + bin, home + '/go/bin/' + bin, '/root/go/bin/' + bin,
-    '/home/ubuntu/go/bin/' + bin, home + '/.local/bin/' + bin, '/opt/' + bin + '/' + bin];
+let _loginPath: string[] | null = null;
+async function loginPathDirs(): Promise<string[]> {
+  if (_loginPath) return _loginPath;
+  try { const r = await run('bash', ['-lc', 'echo -n "$PATH"'], 5000); _loginPath = (r.code === 0 ? r.stdout : '').split(':').map(s => s.trim()).filter(Boolean); }
+  catch { _loginPath = []; }
+  return _loginPath;
 }
-/** Resolve a tool to an absolute path — tolerant of pm2's limited PATH (checks which + common dirs). */
+/** Resolve a tool to an absolute path — tolerant of pm2's limited PATH (scans PATH, login-shell PATH and common install dirs). */
 async function resolveBin(bin: string): Promise<string | null> {
   if (bin in _binCache) return _binCache[bin];
   let found: string | null = null;
-  if (bin.startsWith('/')) { found = fs.existsSync(bin) ? bin : null; }
-  if (!found) {
-    const r = await run(process.platform === 'win32' ? 'where' : 'which', [bin], 5000);
-    if (r.code === 0 && r.stdout.trim()) found = r.stdout.trim().split('\n')[0].trim();
+  if (bin.startsWith('/')) { _binCache[bin] = fs.existsSync(bin) ? bin : null; return _binCache[bin]; }
+  const home = process.env.HOME || '/root';
+  const dirs = new Set<string>();
+  (process.env.PATH || '').split(':').forEach(d => d && dirs.add(d));
+  (await loginPathDirs()).forEach(d => dirs.add(d));
+  ['/usr/local/bin', '/usr/bin', '/bin', '/snap/bin', '/usr/local/go/bin',
+   home + '/go/bin', '/root/go/bin', '/home/ubuntu/go/bin', '/home/ec2-user/go/bin',
+   home + '/.local/bin', home + '/.pdtm/go/bin', '/opt/' + bin, '/opt/' + bin + '/' + bin].forEach(d => dirs.add(d));
+  for (const d of dirs) {
+    const p = d.endsWith('/' + bin) ? d : d.replace(/\/$/, '') + '/' + bin;
+    try { if (fs.existsSync(p) && fs.statSync(p).isFile()) { found = p; break; } } catch { /* */ }
   }
-  if (!found) { for (const c of binCandidates(bin)) { try { if (fs.existsSync(c)) { found = c; break; } } catch { /* */ } } }
   _binCache[bin] = found;
   return found;
 }

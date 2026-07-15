@@ -84,17 +84,19 @@ export async function runJob(jobId: string) {
   await withTenant(job.tenant_id, async (c) => {
     for (const f of findings) {
       counts[f.severity] = (counts[f.severity] || 0) + 1;
+      if (!f.evidence) f.evidence = {};
+      if (!(f.evidence as any).url) (f.evidence as any).url = target;
       const fp = fingerprint(host, f);
       const due = new Date(Date.now() + slaDaysFor(slaPolicy, f.severity, asset ? asset.criticality : 'High') * 86400000);
       const risk = riskScore({ cvss: f.cvss, severity: f.severity, epss: null, kev: false, assetCriticality: asset ? asset.criticality : 'High' });
       await c.query(
         `INSERT INTO vapt.findings
-           (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,risk_score)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,risk_score,impact)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          ON CONFLICT (asset_id,fingerprint) DO UPDATE
-           SET scan_job_id=EXCLUDED.scan_job_id, description=EXCLUDED.description, severity=EXCLUDED.severity, risk_score=EXCLUDED.risk_score, last_seen=now()`,
+           SET scan_job_id=EXCLUDED.scan_job_id, description=EXCLUDED.description, severity=EXCLUDED.severity, risk_score=EXCLUDED.risk_score, impact=EXCLUDED.impact, last_seen=now()`,
         [job.tenant_id, jobId, job.asset_id, fp, f.title, f.description || null, f.remediation || null,
-         f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, risk]);
+         f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, risk, f.impact || null]);
     }
   });
   steps[storeIdx].status = 'done'; steps[storeIdx].finishedAt = new Date().toISOString(); steps[storeIdx].findings = findings.length;

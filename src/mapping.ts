@@ -17,9 +17,21 @@ const CATEGORY_REFS: Record<string, string[]> = {
   info:       ['SEBI: ID.AM'],
 };
 
+const IMPACT: Record<string, string> = {
+  tls: 'Traffic to this service could be intercepted, downgraded or tampered with, exposing credentials and session data in transit.',
+  headers: 'Missing browser security headers leave users exposed to cross-site scripting (XSS), clickjacking and MIME-sniffing attacks.',
+  cookies: 'Session cookies without protective flags can be stolen or leaked, enabling session hijacking and account takeover.',
+  exposure: 'Disclosed files, versions or metadata reveal information that helps an attacker fingerprint and target the system.',
+  injection: 'An attacker could inject malicious input to read or modify data, run scripts in users\' browsers, or bypass access controls.',
+  dependency: 'A known-vulnerable component may be exploited, potentially leading to remote code execution or data compromise.',
+  network: 'Each internet-exposed service widens the attack surface and may be brute-forced, fingerprinted or exploited.',
+  vulnerability: 'If exploited, this weakness could let an attacker compromise the confidentiality, integrity or availability of the application.',
+  info: 'Informational finding — provides useful context with low direct risk.',
+};
 export function enrich(f: Finding): Finding {
   if (!f.frameworkRefs || f.frameworkRefs.length === 0) {
     f.frameworkRefs = CATEGORY_REFS[f.category] || ['SEBI: DE.VA', 'RBI: Sec 26 (VA/PT)'];
   }
+  if (!f.impact) f.impact = IMPACT[f.category] || IMPACT.vulnerability;
   return f;
 }

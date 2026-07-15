@@ -83,10 +83,11 @@ export const passiveScanner: Scanner = {
     }
     if (!isHttps && has('content-security-policy')) { /* no-op */ }
 
-    // 3. Server banner / tech disclosure
+    // 3. Server banner / tech disclosure — only when a version or specific framework is revealed
     const banner = [h.get('server'), h.get('x-powered-by')].filter(Boolean).join('; ');
-    if (banner) add(out, { title: 'Server/technology banner disclosed', severity: 'Low', category: 'exposure', scanner: 'passive',
-      description: `Response advertises: ${banner}`, remediation: 'Suppress or genericise Server and X-Powered-By headers.', evidence: { request: 'GET ' + url, response: `Server: ${h.get('server') || '(none)'}${h.get('x-powered-by') ? '; X-Powered-By: ' + h.get('x-powered-by') : ''}` } });
+    const revealing = /\d/.test(banner) || /(express|php|asp|tomcat|jetty|gunicorn|werkzeug|django|rails|iis|coyote|openresty|passenger|kestrel)/i.test(banner);
+    if (banner && revealing) add(out, { title: 'Server/technology version or framework disclosed', severity: 'Low', category: 'exposure', scanner: 'passive',
+      description: `Response advertises: ${banner}`, remediation: 'Genericise or remove version/framework tokens from Server and X-Powered-By headers.', evidence: { request: 'GET ' + url, response: `Server: ${h.get('server') || '(none)'}${h.get('x-powered-by') ? '; X-Powered-By: ' + h.get('x-powered-by') : ''}` } });
 
     // 4. Cookie flags
     for (const c of resp.setCookies) {
@@ -152,7 +153,7 @@ export const passiveScanner: Scanner = {
 
     // 10. CSP quality
     const csp = h.get('content-security-policy');
-    if (csp && /unsafe-inline|unsafe-eval|\*/.test(csp)) add(out, { title: 'Weak Content-Security-Policy (uses unsafe-inline / unsafe-eval / wildcard)', severity: 'Low', category: 'headers', scanner: 'passive', description: 'The CSP contains directives that substantially weaken its XSS protection.', remediation: "Remove 'unsafe-inline'/'unsafe-eval' and wildcard sources; use nonces or hashes.", cwe: 'CWE-693', evidence: { request: 'GET ' + url, response: 'Content-Security-Policy: ' + csp.slice(0, 220) } });
+    if (csp && (/unsafe-eval/i.test(csp) || /(?:default-src|script-src|object-src)[^;]*\s\*(?:\s|;|$)/i.test(csp))) add(out, { title: 'Weak Content-Security-Policy (uses unsafe-eval or wildcard source)', severity: 'Medium', category: 'headers', scanner: 'passive', description: "The CSP permits unsafe-eval or a wildcard source, materially weakening XSS protection.", remediation: "Remove 'unsafe-eval' and wildcard (*) sources; prefer 'self', nonces or hashes.", cwe: 'CWE-693', evidence: { request: 'GET ' + url, response: 'Content-Security-Policy: ' + csp.slice(0, 220) } });
 
     return out;
   },
