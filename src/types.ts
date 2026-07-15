@@ -18,6 +18,7 @@ export interface Finding {
   source?: string;                  // scanner | import:<tool> | manual
 }
 
+export interface AuthConfig { method: string; loginUrl?: string; username?: string; secret?: string; extra?: any; }
 export interface ScanContext {
   jobId: string;
   tenantId: string;
@@ -25,6 +26,8 @@ export interface ScanContext {
   targetUrl: string;
   host: string;
   profile: Profile;
+  auth?: AuthConfig;
+  extraUrls?: string[];
 }
 
 export interface Scanner {

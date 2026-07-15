@@ -33,7 +33,13 @@ export const nucleiScanner: Scanner = {
   key: 'nuclei', kind: 'active',
   available: () => onPath(config.tools.nuclei),
   async run(ctx: ScanContext): Promise<Finding[]> {
-    const r = await run(config.tools.nuclei, ['-u', ctx.targetUrl, '-jsonl', '-silent', '-severity', 'critical,high,medium,low'], 180000);
+    const args = ['-u', ctx.targetUrl, '-jsonl', '-silent', '-fr', '-severity', 'critical,high,medium,low'];
+    const a = ctx.auth;
+    if (a && a.method === 'bearer') args.push('-H', 'Authorization: Bearer ' + (a.secret || ''));
+    else if (a && a.method === 'cookie') args.push('-H', 'Cookie: ' + (a.secret || ''));
+    else if (a && a.method === 'header' && a.extra && a.extra.headerName) args.push('-H', a.extra.headerName + ': ' + (a.secret || ''));
+    for (const eu of (ctx.extraUrls || []).slice(0, 50)) args.push('-u', eu);
+    const r = await run(config.tools.nuclei, args, 240000);
     const out: Finding[] = [];
     for (const line of r.stdout.split('\n').filter(Boolean)) {
       try {

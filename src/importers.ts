@@ -107,3 +107,19 @@ export function parseImport(format: ImportFormat, content: string): Finding[] {
     default: return [];
   }
 }
+
+
+// ---- OpenAPI / Swagger -> list of endpoint URLs ----
+export function parseOpenApiUrls(content: string, baseUrl?: string): string[] {
+  let spec: any;
+  try { spec = JSON.parse(content); } catch { return []; }   // JSON specs only
+  const servers: string[] = (spec.servers || []).map((s: any) => s.url).filter(Boolean);
+  const base = (servers[0] || baseUrl || '').replace(/\/$/, '');
+  const urls: string[] = [];
+  for (const p of Object.keys(spec.paths || {})) {
+    const path = p.replace(/\{[^}]+\}/g, '1');
+    try { urls.push(new URL(base + path).toString()); }
+    catch { try { if (baseUrl) urls.push(new URL(path, baseUrl).toString()); } catch { /* skip */ } }
+  }
+  return [...new Set(urls)].slice(0, 200);
+}

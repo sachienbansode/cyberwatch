@@ -6,9 +6,11 @@ import { query, audit } from './db';
 import { config } from './config';
 import { login, requireAuth, AuthedReq } from './auth';
 import { streamReport } from './report';
-import { detectFormat, parseImport } from './importers';
+import { detectFormat, parseImport, parseOpenApiUrls } from './importers';
 import { enrichFinding } from './enrich';
 import { enrich as mapRefs, slaDays } from './mapping';
+import { riskScore } from './enrich';
+import { captureScreenshot } from './screenshot';
 import { createHash } from 'crypto';
 
 export function createApp() {
@@ -129,10 +131,11 @@ export function createApp() {
       mapRefs(f); counts[f.severity] = (counts[f.severity] || 0) + 1;
       const fp = createHash('sha1').update(`${f.scanner}|${f.category}|${f.title}|${host}`).digest('hex');
       const due = new Date(Date.now() + slaDays(f.severity) * 86400000);
-      await query(`INSERT INTO vapt.findings (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,cve,cvss_vector,refs,source)
-        VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-        ON CONFLICT (asset_id,fingerprint) DO UPDATE SET last_seen=now(), severity=EXCLUDED.severity, description=EXCLUDED.description`,
-        [req.user!.tenant, asset.id, fp, f.title, f.description || null, f.remediation || null, f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, f.cve || null, f.cvssVector || null, f.refs || [], f.source || ('import:' + fmt)]);
+      const risk = riskScore({ cvss: f.cvss, severity: f.severity, epss: null, kev: false, assetCriticality: asset.criticality });
+      await query(`INSERT INTO vapt.findings (tenant_id,scan_job_id,asset_id,fingerprint,title,description,remediation,severity,cvss,cwe,category,scanner,evidence,framework_refs,due_at,cve,cvss_vector,refs,source,risk_score)
+        VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        ON CONFLICT (asset_id,fingerprint) DO UPDATE SET last_seen=now(), severity=EXCLUDED.severity, description=EXCLUDED.description, risk_score=EXCLUDED.risk_score`,
+        [req.user!.tenant, asset.id, fp, f.title, f.description || null, f.remediation || null, f.severity, f.cvss || null, f.cwe || null, f.category, f.scanner, f.evidence || {}, f.frameworkRefs || [], due, f.cve || null, f.cvssVector || null, f.refs || [], f.source || ('import:' + fmt), risk]);
     }
     await audit(req.user!.tenant, req.user!.email, 'findings.imported', 'import', imp.id, { source: fmt, count: findings.length });
     res.status(201).json({ importId: imp.id, source: fmt, imported: findings.length, bySeverity: counts });
@@ -164,6 +167,57 @@ export function createApp() {
     const [row] = await query('UPDATE vapt.findings SET epss=$3, kev=$4, risk_score=$5 WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, req.user!.tenant, en.epss, en.kev, en.risk_score]);
     await query('INSERT INTO vapt.finding_events(tenant_id,finding_id,actor,type,detail) VALUES ($1,$2,$3,$4,$5)', [req.user!.tenant, req.params.id, req.user!.email, 'enrich', en]);
     res.json(row);
+  });
+
+
+  // ---- Screenshots ----
+  const sendShot = async (row: any, res: Response) => {
+    if (!row || !row.image_b64) return res.status(404).json({ error: 'no screenshot' });
+    res.setHeader('Content-Type', 'image/png');
+    res.end(Buffer.from(row.image_b64, 'base64'));
+  };
+  app.get('/api/v1/scan-jobs/:id/screenshot', requireAuth('scan:read'), async (req: AuthedReq, res) => {
+    const [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 1', [req.params.id, req.user!.tenant]);
+    await sendShot(row, res);
+  });
+  app.get('/api/v1/assets/:id/screenshot', requireAuth('asset:read'), async (req: AuthedReq, res) => {
+    const [row] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE asset_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 1', [req.params.id, req.user!.tenant]);
+    await sendShot(row, res);
+  });
+  app.get('/api/v1/scan-jobs/:id/has-screenshot', requireAuth('scan:read'), async (req: AuthedReq, res) => {
+    const [row] = await query<any>('SELECT id FROM vapt.screenshots WHERE scan_job_id=$1 AND tenant_id=$2 LIMIT 1', [req.params.id, req.user!.tenant]);
+    res.json({ has: !!row });
+  });
+
+  // ---- Authenticated-scan config ----
+  app.get('/api/v1/assets/:id/auth', requireAuth('scan:run'), async (req: AuthedReq, res) => {
+    const [row] = await query<any>('SELECT asset_id, method, login_url, username, extra, (secret IS NOT NULL AND secret <> \'\') AS has_secret FROM asset.asset_auth WHERE asset_id=$1', [req.params.id]);
+    res.json(row || { method: 'none' });
+  });
+  app.put('/api/v1/assets/:id/auth', requireAuth('scan:run'), async (req: AuthedReq, res) => {
+    const s = z.object({ method: z.enum(['none','form','bearer','cookie','header']), loginUrl: z.string().optional(), username: z.string().optional(), secret: z.string().optional(), extra: z.record(z.any()).optional() }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: s.error.flatten() });
+    const b = s.data;
+    await query(`INSERT INTO asset.asset_auth(asset_id,method,login_url,username,secret,extra,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,now())
+       ON CONFLICT (asset_id) DO UPDATE SET method=EXCLUDED.method, login_url=EXCLUDED.login_url, username=EXCLUDED.username,
+         secret=COALESCE(NULLIF(EXCLUDED.secret,''), asset.asset_auth.secret), extra=EXCLUDED.extra, updated_at=now()`,
+      [req.params.id, b.method, b.loginUrl || null, b.username || null, b.secret || '', b.extra || {}]);
+    await audit(req.user!.tenant, req.user!.email, 'asset.auth_configured', 'asset', req.params.id, { method: b.method });
+    res.json({ ok: true });
+  });
+
+  // ---- OpenAPI import (expands the scan surface) ----
+  app.post('/api/v1/assets/:id/openapi', requireAuth('asset:write'), async (req: AuthedReq, res) => {
+    const s = z.object({ content: z.string().min(2) }).safeParse(req.body);
+    if (!s.success) return res.status(400).json({ error: 'content required' });
+    const [asset] = await query<any>('SELECT * FROM asset.assets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user!.tenant]);
+    if (!asset) return res.status(404).json({ error: 'asset not found' });
+    const urls = parseOpenApiUrls(s.data.content, asset.base_url);
+    if (!urls.length) return res.status(400).json({ error: 'no endpoints parsed (JSON OpenAPI only)' });
+    await query('UPDATE asset.assets SET extra_urls=$2 WHERE id=$1', [req.params.id, urls]);
+    await audit(req.user!.tenant, req.user!.email, 'asset.openapi_imported', 'asset', req.params.id, { count: urls.length });
+    res.json({ endpoints: urls.length });
   });
 
   // ---- Stats ----

@@ -17,6 +17,7 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
 
   const counts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
   findings.forEach(f => counts[f.severity] = (counts[f.severity] || 0) + 1);
+  const [shot] = await query<any>('SELECT image_b64 FROM vapt.screenshots WHERE scan_job_id=$1 ORDER BY created_at DESC LIMIT 1', [jobId]);
 
   const doc = new PDFDocument({ size: 'A4', margin: 54, info: { Title: `AntShield VAPT Report ${asset?.name || ''} v${job.version}` } });
   res.setHeader('Content-Type', 'application/pdf');
@@ -58,6 +59,18 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
   });
   doc.y = y + 60; doc.x = 54;
 
+  // Target screenshot (evidence)
+  if (shot && shot.image_b64) {
+    try {
+      if (doc.y > 560) doc.addPage();
+      doc.moveDown(0.6);
+      doc.fillColor(NAVY).fontSize(12).font('Helvetica-Bold').text('Target screenshot');
+      doc.moveDown(0.3);
+      doc.image(Buffer.from(shot.image_b64, 'base64'), { fit: [487, 300], align: 'center' });
+      doc.moveDown(0.5);
+    } catch { /* image best-effort */ }
+  }
+
   // Findings detail
   doc.moveDown(1);
   doc.fillColor(NAVY).fontSize(13).font('Helvetica-Bold').text('Findings & recommendations');
@@ -72,6 +85,8 @@ export async function streamReport(jobId: string, tenant: string, res: Response)
     doc.fillColor(MUTED).fontSize(9).font('Helvetica').text(`${f.category || '-'}${f.cvss ? '  •  CVSS '+f.cvss : ''}${f.cve ? '  •  '+f.cve : ''}${f.risk_score != null ? '  •  Risk '+f.risk_score : ''}${f.kev ? '  •  KEV' : ''}${f.cwe ? '  •  '+f.cwe : ''}  •  ${(f.framework_refs||[]).join('  •  ')}`, 122);
     if (f.description) doc.fillColor('#333').fontSize(9.5).font('Helvetica').text(f.description, 122, undefined, { width: 419 });
     if (f.remediation) { doc.fillColor(BRAND).fontSize(9).font('Helvetica-Bold').text('Recommendation: ', 122, undefined, { continued: true }); doc.fillColor('#333').font('Helvetica').text(f.remediation, { width: 419 }); }
+    const ev = f.evidence && typeof f.evidence === 'object' ? Object.entries(f.evidence).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}: ${String(v).slice(0, 120)}`).join('   •   ') : '';
+    if (ev) { doc.fillColor('#555').fontSize(8.5).font('Helvetica-Oblique').text('Evidence: ' + ev, 122, undefined, { width: 419 }); }
     doc.moveDown(0.8);
     doc.moveTo(54, doc.y).lineTo(541, doc.y).strokeColor('#eef2f7').stroke();
     doc.moveDown(0.4);
