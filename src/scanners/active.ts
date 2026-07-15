@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import { Scanner, ScanContext, Finding } from '../types';
 import { config } from '../config';
 
@@ -15,10 +16,27 @@ function run(cmd: string, args: string[], timeoutMs: number): Promise<{ code: nu
     child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
   });
 }
-async function onPath(bin: string): Promise<boolean> {
-  const r = await run(process.platform === 'win32' ? 'where' : 'which', [bin], 5000);
-  return r.code === 0 && r.stdout.trim().length > 0;
+const _binCache: Record<string, string | null> = {};
+function binCandidates(bin: string): string[] {
+  const home = process.env.HOME || '/root';
+  return ['/usr/local/bin/' + bin, '/usr/bin/' + bin, '/bin/' + bin, '/snap/bin/' + bin,
+    '/usr/local/go/bin/' + bin, home + '/go/bin/' + bin, '/root/go/bin/' + bin,
+    '/home/ubuntu/go/bin/' + bin, home + '/.local/bin/' + bin, '/opt/' + bin + '/' + bin];
 }
+/** Resolve a tool to an absolute path — tolerant of pm2's limited PATH (checks which + common dirs). */
+async function resolveBin(bin: string): Promise<string | null> {
+  if (bin in _binCache) return _binCache[bin];
+  let found: string | null = null;
+  if (bin.startsWith('/')) { found = fs.existsSync(bin) ? bin : null; }
+  if (!found) {
+    const r = await run(process.platform === 'win32' ? 'where' : 'which', [bin], 5000);
+    if (r.code === 0 && r.stdout.trim()) found = r.stdout.trim().split('\n')[0].trim();
+  }
+  if (!found) { for (const c of binCandidates(bin)) { try { if (fs.existsSync(c)) { found = c; break; } } catch { /* */ } } }
+  _binCache[bin] = found;
+  return found;
+}
+async function onPath(bin: string): Promise<boolean> { return (await resolveBin(bin)) !== null; }
 const mapSev = (s: string): Finding['severity'] => {
   const x = (s || '').toLowerCase();
   if (x.startsWith('crit')) return 'Critical';
@@ -39,7 +57,7 @@ export const nucleiScanner: Scanner = {
     else if (a && a.method === 'cookie') args.push('-H', 'Cookie: ' + (a.secret || ''));
     else if (a && a.method === 'header' && a.extra && a.extra.headerName) args.push('-H', a.extra.headerName + ': ' + (a.secret || ''));
     for (const eu of (ctx.extraUrls || []).slice(0, 50)) args.push('-u', eu);
-    const r = await run(config.tools.nuclei, args, 240000);
+    const r = await run((await resolveBin(config.tools.nuclei)) || config.tools.nuclei, args, 240000);
     const out: Finding[] = [];
     for (const line of r.stdout.split('\n').filter(Boolean)) {
       try {
@@ -63,7 +81,7 @@ export const nmapScanner: Scanner = {
   key: 'nmap', kind: 'active',
   available: () => onPath(config.tools.nmap),
   async run(ctx: ScanContext): Promise<Finding[]> {
-    const r = await run(config.tools.nmap, ['-Pn', '-sV', '-oX', '-', ctx.host], 180000);
+    const r = await run((await resolveBin(config.tools.nmap)) || config.tools.nmap, ['-Pn', '-sV', '-oX', '-', ctx.host], 180000);
     const out: Finding[] = [];
     const re = /<port protocol="(\w+)" portid="(\d+)">\s*<state state="open"[^>]*\/>\s*(?:<service name="([^"]*)"(?:[^>]*product="([^"]*)")?)?/g;
     let m;
@@ -84,7 +102,7 @@ function zapScanner(key: string, bin: () => string, timeout: number): Scanner {
     available: () => onPath(bin()),
     async run(ctx: ScanContext): Promise<Finding[]> {
       // ZAP writes a JSON report to stdout-adjacent file; we request JSON on stdout via -J then read it back if produced.
-      const r = await run(bin(), ['-t', ctx.targetUrl, '-J', 'zap-report.json', '-I'], timeout);
+      const r = await run((await resolveBin(bin())) || bin(), ['-t', ctx.targetUrl, '-J', 'zap-report.json', '-I'], timeout);
       const out: Finding[] = [];
       try {
         const fs = require('fs');
@@ -116,7 +134,7 @@ export const testsslScanner: Scanner = {
   key: 'testssl', kind: 'active',
   available: () => onPath(config.tools.testssl),
   async run(ctx: ScanContext): Promise<Finding[]> {
-    const r = await run(config.tools.testssl, ['--quiet', '--jsonfile', 'testssl.json', ctx.host], 240000);
+    const r = await run((await resolveBin(config.tools.testssl)) || config.tools.testssl, ['--quiet', '--jsonfile', 'testssl.json', ctx.host], 240000);
     const out: Finding[] = [];
     try {
       const fs = require('fs');
